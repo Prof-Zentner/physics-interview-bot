@@ -53,6 +53,20 @@ def get_all_interviews():
     conn.close()
     return df
 
+def get_student_last_interview(student_id):
+    """Get the most recent interview for a student"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM interviews 
+        WHERE student_id = ? 
+        ORDER BY date DESC 
+        LIMIT 1
+    ''', (student_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
 def grade_transcript(transcript):
     """Use Gemini AI to grade the interview transcript"""
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -243,13 +257,59 @@ def main():
         
         if st.button("Start Interview"):
             if student_id:
-                st.session_state.student_id = student_id
-                st.rerun()
+                # Check if admin
+                if student_id == "ADMIN123":
+                    st.session_state.student_id = student_id
+                    st.rerun()
+                else:
+                    # Check for previous interview
+                    last_interview = get_student_last_interview(student_id)
+                    
+                    if last_interview:
+                        st.session_state.student_id = student_id
+                        st.session_state.show_previous_results = True
+                        st.rerun()
+                    else:
+                        # New student - start interview
+                        st.session_state.student_id = student_id
+                        st.rerun()
             else:
                 st.error("Please enter a Student ID")
     else:
+        # Check if we need to show previous results
+        if hasattr(st.session_state, 'show_previous_results') and st.session_state.show_previous_results:
+            st.title("🎓 Welcome Back!")
+            
+            last_interview = get_student_last_interview(st.session_state.student_id)
+            
+            if last_interview:
+                st.write(f"**Student ID:** {st.session_state.student_id}")
+                st.write(f"**Last Interview:** {last_interview[2]}")  # date
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Previous Score", f"{last_interview[3]}/100")
+                with col2:
+                    status_color = "🟢" if last_interview[4] == "Pass" else "🔴"
+                    st.metric("Previous Status", f"{status_color} {last_interview[4]}")
+                
+                st.divider()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📝 Start New Interview", use_container_width=True):
+                        del st.session_state.show_previous_results
+                        st.rerun()
+                with col2:
+                    if st.button("👋 Logout", use_container_width=True):
+                        for key in list(st.session_state.keys()):
+                            del st.session_state[key]
+                        st.rerun()
+            else:
+                del st.session_state.show_previous_results
+                st.rerun()
         # Check if admin
-        if st.session_state.student_id == "ADMIN123":
+        elif st.session_state.student_id == "ADMIN123":
             admin_panel()
         else:
             chat_interface(st.session_state.student_id)
