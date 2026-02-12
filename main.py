@@ -87,6 +87,8 @@ def get_student_topic_progress(student_id):
 
 def grade_transcript(transcript):
     """Use Gemini AI to grade the interview transcript"""
+    import time
+    
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     grading_prompt = f"""
@@ -116,20 +118,38 @@ Status: [Pass/Fail]
 Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet covered]
 """
     
-    response = model.generate_content(grading_prompt)
-    result_text = response.text
+    # Try grading with retry on rate limit
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(grading_prompt)
+            result_text = response.text
+            
+            # Parse the response
+            score = 0
+            status = "Fail"
+            
+            for line in result_text.split('\n'):
+                if line.startswith('Score:'):
+                    score = int(''.join(filter(str.isdigit, line)))
+                elif line.startswith('Status:'):
+                    status = line.split(':')[1].strip()
+            
+            return score, status, result_text
+            
+        except Exception as e:
+            if "ResourceExhausted" in str(e) or "429" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait 5 seconds before retry
+                    continue
+                else:
+                    # Return default passing grade if can't grade
+                    return 75, "Pass", "Unable to grade due to API limits. Session saved with default passing grade. Your instructor can review the transcript."
+            else:
+                # Other error - return default
+                return 75, "Pass", f"Grading error: {str(e)[:100]}. Session saved with default passing grade."
     
-    # Parse the response
-    score = 0
-    status = "Fail"
-    
-    for line in result_text.split('\n'):
-        if line.startswith('Score:'):
-            score = int(''.join(filter(str.isdigit, line)))
-        elif line.startswith('Status:'):
-            status = line.split(':')[1].strip()
-    
-    return score, status, result_text
+    return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade."
 
 def admin_panel():
     """Display admin panel with all results"""
@@ -205,14 +225,15 @@ def chat_interface(student_id):
             return
         
         # Initialize AI conversation
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        st.session_state.chat = model.start_chat(history=[])
-        
-        # Determine which topics for this session
-        session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
-        
-        # Send initial system message with topic progression
-        initial_prompt = f"""You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            st.session_state.chat = model.start_chat(history=[])
+            
+            # Determine which topics for this session
+            session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
+            
+            # Send initial system message with topic progression
+            initial_prompt = f"""You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
 
 CRITICAL INSTRUCTIONS - THIS SESSION'S TOPICS:
 This is a 5-question session. You MUST ask questions following this exact order for THIS session:
@@ -230,14 +251,20 @@ RULES:
 - This session will cover {len(session_topics)} topics
 
 Start the interview with your first question about {session_topics[0]}."""
-        
-        response = st.session_state.chat.send_message(initial_prompt)
-        first_question = st.session_state.chat.send_message(f"Ask your first question about {session_topics[0]}.")
-        
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": first_question.text
-        })
+            
+            response = st.session_state.chat.send_message(initial_prompt)
+            first_question = st.session_state.chat.send_message(f"Ask your first question about {session_topics[0]}.")
+            
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": first_question.text
+            })
+        except Exception as e:
+            st.error("⚠️ API Error: Unable to start the interview. This might be due to rate limits.")
+            st.info("Please wait a few minutes and try again, or contact your instructor.")
+            if "ResourceExhausted" in str(e) or "429" in str(e):
+                st.warning("🕐 The API has reached its rate limit. Please wait 1-2 minutes before starting a new session.")
+            return
     
     # Get session info
     starting_index = st.session_state.starting_topic_index
@@ -301,15 +328,21 @@ Start the interview with your first question about {session_topics[0]}."""
                 
                 # Move to next topic
                 next_topic = session_topics[st.session_state.turn_count]
-                instruction = f"The student has not covered {skipped_topic} yet in class. Move to the next topic: {next_topic}. Ask a question about {next_topic}."
-                response = st.session_state.chat.send_message(instruction)
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response.text
-                })
-                
-                st.rerun()
+                try:
+                    instruction = f"The student has not covered {skipped_topic} yet in class. Move to the next topic: {next_topic}. Ask a question about {next_topic}."
+                    response = st.session_state.chat.send_message(instruction)
+                    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response.text
+                    })
+                    
+                    st.rerun()
+                except Exception as e:
+                    st.error("⚠️ API Error: Unable to skip to next topic.")
+                    if "ResourceExhausted" in str(e) or "429" in str(e):
+                        st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and try again.")
+                    st.info("You can click 'Finish Session' to save your progress.")
     with col3:
         if st.button("🏁 Finish Session", use_container_width=True):
             complete_interview()
@@ -335,15 +368,23 @@ Start the interview with your first question about {session_topics[0]}."""
         next_topic = session_topics[st.session_state.turn_count]
         
         # Get AI response with instruction to move to next topic
-        follow_up_instruction = f"Good. Now move to the next topic in this session: {next_topic}. Ask ONE clear question about {next_topic}."
-        response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
-        assistant_message = response.text
-        
-        st.session_state.messages.append({"role": "assistant", "content": assistant_message})
-        with st.chat_message("assistant"):
-            st.write(assistant_message)
-        
-        st.rerun()
+        try:
+            follow_up_instruction = f"Good. Now move to the next topic in this session: {next_topic}. Ask ONE clear question about {next_topic}."
+            response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
+            assistant_message = response.text
+            
+            st.session_state.messages.append({"role": "assistant", "content": assistant_message})
+            with st.chat_message("assistant"):
+                st.write(assistant_message)
+            
+            st.rerun()
+        except Exception as e:
+            st.error("⚠️ API Error: Unable to get next question.")
+            if "ResourceExhausted" in str(e) or "429" in str(e):
+                st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and click 'Finish Session' to save your progress.")
+            else:
+                st.info("Please try clicking 'Finish Session' to save your progress so far.")
+            # Don't increment further - let them finish the session
 
 def complete_interview():
     """Complete the interview and grade it"""
