@@ -9,8 +9,7 @@ import io
 # Configure Gemini API
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
-    st.error("⚠️ API Key not found! Please set the GEMINI_API_KEY environment variable.")
-    st.info("Run this command in your terminal before starting the app:\nset GEMINI_API_KEY=your-actual-api-key")
+    st.error("⚠️ API Key not found! Please contact the administrator.")
     st.stop()
 
 genai.configure(api_key=API_KEY)
@@ -240,7 +239,7 @@ def main():
         st.title("🎓 AP Physics Interview Bot")
         st.write("Welcome! Please enter your Student ID to begin.")
         
-        student_id = st.text_input("Student ID:", placeholder="Enter your ID or ADMIN123")
+        student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
         
         if st.button("Start Interview"):
             if student_id:
