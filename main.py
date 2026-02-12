@@ -136,29 +136,83 @@ def chat_interface(student_id):
     st.write("**Topic:** Waves and Modern Physics")
     st.divider()
     
+    # Define the topic progression
+    TOPICS = [
+        "Simple Harmonic Motion",
+        "Pendulum and Mass Spring",
+        "Wave form",
+        "Damped oscillation Damped Pendulum",
+        "Waves on a string",
+        "Standing Waves",
+        "Sound Waves",
+        "Doppler effect",
+        "Musical instruments",
+        "Light as a wave",
+        "Angular Resolution",
+        "Thin film",
+        "Polarization",
+        "Thermal Physics Black body",
+        "Light as a particle",
+        "Radioactivity",
+        "Relativity"
+    ]
+    
     # Initialize session state
     if 'messages' not in st.session_state:
         st.session_state.messages = []
         st.session_state.turn_count = 0
         st.session_state.interview_complete = False
+        st.session_state.current_topic_index = 0
         
         # Initialize AI conversation
         model = genai.GenerativeModel('gemini-2.5-flash')
         st.session_state.chat = model.start_chat(history=[])
         
-        # Send initial system message
-        initial_prompt = """You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
-Your job is to ask probing questions one at a time to test their understanding. 
-Topics may include: wave properties, interference, diffraction, electromagnetic spectrum, photoelectric effect, quantum mechanics, relativity, etc.
-Ask ONE clear question at a time. Be encouraging but thorough in testing their knowledge."""
+        # Send initial system message with topic progression
+        initial_prompt = f"""You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
+
+CRITICAL INSTRUCTIONS - TOPIC PROGRESSION:
+You MUST ask questions following this exact order of topics, one topic at a time:
+1. Simple Harmonic Motion
+2. Pendulum and Mass Spring
+3. Wave form
+4. Damped oscillation Damped Pendulum
+5. Waves on a string
+6. Standing Waves
+7. Sound Waves
+8. Doppler effect
+9. Musical instruments
+10. Light as a wave
+11. Angular Resolution
+12. Thin film
+13. Polarization
+14. Thermal Physics Black body
+15. Light as a particle
+16. Radioactivity
+17. Relativity
+
+RULES:
+- Start with topic 1: Simple Harmonic Motion
+- Ask ONE clear, focused question about the current topic
+- After the student answers, move to the NEXT topic in the list
+- Do NOT skip topics or go out of order
+- Be encouraging but test their understanding thoroughly
+- Each question should probe their conceptual understanding of that specific topic
+
+Start the interview with your first question about Simple Harmonic Motion."""
         
         response = st.session_state.chat.send_message(initial_prompt)
-        first_question = st.session_state.chat.send_message("Start the interview with your first question.")
+        first_question = st.session_state.chat.send_message("Ask your first question about Simple Harmonic Motion.")
         
         st.session_state.messages.append({
             "role": "assistant",
             "content": first_question.text
         })
+    
+    # Display current topic progress
+    if st.session_state.turn_count < len(TOPICS):
+        current_topic = TOPICS[st.session_state.turn_count]
+        st.info(f"📚 Current Topic ({st.session_state.turn_count + 1}/{len(TOPICS)}): **{current_topic}**")
     
     # Display chat messages
     for message in st.session_state.messages:
@@ -169,7 +223,7 @@ Ask ONE clear question at a time. Be encouraging but thorough in testing their k
     if st.session_state.interview_complete:
         st.success("✅ Interview completed and graded!")
         if st.button("Start New Interview"):
-            for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'student_id']:
+            for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'student_id', 'current_topic_index']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
@@ -178,7 +232,7 @@ Ask ONE clear question at a time. Be encouraging but thorough in testing their k
     # Show turn counter and finish button
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.caption(f"Question {st.session_state.turn_count + 1}/5")
+        st.caption(f"Question {st.session_state.turn_count + 1}/{len(TOPICS)}")
     with col2:
         if st.button("🏁 Finish Interview"):
             complete_interview()
@@ -194,13 +248,17 @@ Ask ONE clear question at a time. Be encouraging but thorough in testing their k
         # Increment turn counter
         st.session_state.turn_count += 1
         
-        # Check if we've reached 5 turns
-        if st.session_state.turn_count >= 5:
+        # Check if we've covered all topics
+        if st.session_state.turn_count >= len(TOPICS):
             complete_interview()
             return
         
-        # Get AI response
-        response = st.session_state.chat.send_message(prompt)
+        # Get next topic
+        next_topic = TOPICS[st.session_state.turn_count]
+        
+        # Get AI response with instruction to move to next topic
+        follow_up_instruction = f"Good. Now move to the next topic: {next_topic}. Ask ONE clear question about {next_topic}."
+        response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
         assistant_message = response.text
         
         st.session_state.messages.append({"role": "assistant", "content": assistant_message})
