@@ -21,6 +21,8 @@ def init_db():
     """Initialize the SQLite database"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # Create table if it doesn't exist
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS interviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +34,15 @@ def init_db():
             topic_index INTEGER DEFAULT 0
         )
     ''')
+    
+    # Check if topic_index column exists, add it if it doesn't
+    cursor.execute("PRAGMA table_info(interviews)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'topic_index' not in columns:
+        cursor.execute('ALTER TABLE interviews ADD COLUMN topic_index INTEGER DEFAULT 0')
+        conn.commit()
+    
     conn.commit()
     conn.close()
 
