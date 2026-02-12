@@ -28,21 +28,22 @@ def init_db():
             date TEXT NOT NULL,
             score INTEGER NOT NULL,
             status TEXT NOT NULL,
-            transcript TEXT NOT NULL
+            transcript TEXT NOT NULL,
+            topic_index INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
     conn.close()
 
-def save_interview(student_id, score, status, transcript):
+def save_interview(student_id, score, status, transcript, topic_index):
     """Save interview results to database"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute('''
-        INSERT INTO interviews (student_id, date, score, status, transcript)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (student_id, date, score, status, transcript))
+        INSERT INTO interviews (student_id, date, score, status, transcript, topic_index)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (student_id, date, score, status, transcript, topic_index))
     conn.commit()
     conn.close()
 
@@ -67,6 +68,23 @@ def get_student_last_interview(student_id):
     conn.close()
     return result
 
+def get_student_topic_progress(student_id):
+    """Get the next topic index for a student (where they should continue from)"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT topic_index FROM interviews 
+        WHERE student_id = ? 
+        ORDER BY date DESC 
+        LIMIT 1
+    ''', (student_id,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        # Return the next topic index (the one after the last completed session)
+        return result[0]
+    return 0  # Start from beginning if no history
+
 def grade_transcript(transcript):
     """Use Gemini AI to grade the interview transcript"""
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -78,17 +96,24 @@ Below is the complete transcript of a student interview session:
 
 {transcript}
 
+IMPORTANT GRADING INSTRUCTIONS:
+- If the transcript contains "[Student hasn't learned: X - Not yet covered in class]", DO NOT penalize the student for those topics
+- Only grade the student on topics they actually answered
+- Topics they haven't learned yet should be treated neutrally and NOT count against their score
+- The student should only be evaluated on material they have been taught
+
 Please analyze the student's responses and provide:
 1. A Score from 0-100 based on:
    - Correctness of answers (50%)
    - Understanding of concepts (30%)
    - Depth of explanations (20%)
+   - ONLY for topics they answered (not topics they haven't learned)
 2. A Status: "Pass" if score >= 60, otherwise "Fail"
 
 Respond in this exact format:
 Score: [number]
 Status: [Pass/Fail]
-Feedback: [2-3 sentences explaining the grade]
+Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet covered]
 """
     
     response = model.generate_content(grading_prompt)
@@ -162,57 +187,78 @@ def chat_interface(student_id):
         st.session_state.messages = []
         st.session_state.turn_count = 0
         st.session_state.interview_complete = False
-        st.session_state.current_topic_index = 0
+        
+        # Get where student left off
+        starting_topic_index = get_student_topic_progress(student_id)
+        st.session_state.starting_topic_index = starting_topic_index
+        st.session_state.current_topic_index = starting_topic_index
+        
+        # Check if all topics are completed
+        if starting_topic_index >= len(TOPICS):
+            st.success("🎉 Congratulations! You've completed all topics!")
+            st.info("All 17 topics have been covered. Great work!")
+            if st.button("Start Over from Beginning"):
+                # Reset their progress
+                st.session_state.starting_topic_index = 0
+                st.session_state.current_topic_index = 0
+                st.rerun()
+            return
         
         # Initialize AI conversation
         model = genai.GenerativeModel('gemini-2.5-flash')
         st.session_state.chat = model.start_chat(history=[])
         
+        # Determine which topics for this session
+        session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
+        
         # Send initial system message with topic progression
         initial_prompt = f"""You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
 
-CRITICAL INSTRUCTIONS - TOPIC PROGRESSION:
-You MUST ask questions following this exact order of topics, one topic at a time:
-1. Simple Harmonic Motion
-2. Pendulum and Mass Spring
-3. Wave form
-4. Damped oscillation Damped Pendulum
-5. Waves on a string
-6. Standing Waves
-7. Sound Waves
-8. Doppler effect
-9. Musical instruments
-10. Light as a wave
-11. Angular Resolution
-12. Thin film
-13. Polarization
-14. Thermal Physics Black body
-15. Light as a particle
-16. Radioactivity
-17. Relativity
+CRITICAL INSTRUCTIONS - THIS SESSION'S TOPICS:
+This is a 5-question session. You MUST ask questions following this exact order for THIS session:
+{chr(10).join([f"{i+1}. {topic}" for i, topic in enumerate(session_topics)])}
+
+The student has already completed topics 1-{starting_topic_index} in previous sessions.
 
 RULES:
-- Start with topic 1: Simple Harmonic Motion
-- Ask ONE clear, focused question about the current topic
-- After the student answers, move to the NEXT topic in the list
+- Start with topic: {session_topics[0]}
+- Ask ONE clear, focused question about each topic in order
+- After the student answers, move to the NEXT topic in the session list
 - Do NOT skip topics or go out of order
 - Be encouraging but test their understanding thoroughly
 - Each question should probe their conceptual understanding of that specific topic
+- This session will cover {len(session_topics)} topics
 
-Start the interview with your first question about Simple Harmonic Motion."""
+Start the interview with your first question about {session_topics[0]}."""
         
         response = st.session_state.chat.send_message(initial_prompt)
-        first_question = st.session_state.chat.send_message("Ask your first question about Simple Harmonic Motion.")
+        first_question = st.session_state.chat.send_message(f"Ask your first question about {session_topics[0]}.")
         
         st.session_state.messages.append({
             "role": "assistant",
             "content": first_question.text
         })
     
-    # Display current topic progress
-    if st.session_state.turn_count < len(TOPICS):
-        current_topic = TOPICS[st.session_state.turn_count]
-        st.info(f"📚 Current Topic ({st.session_state.turn_count + 1}/{len(TOPICS)}): **{current_topic}**")
+    # Get session info
+    starting_index = st.session_state.starting_topic_index
+    current_index = st.session_state.current_topic_index
+    session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
+    
+    # Display session progress
+    session_question_num = st.session_state.turn_count + 1
+    total_session_questions = len(session_topics)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"📚 Session Progress: Question {session_question_num}/{total_session_questions}")
+    with col2:
+        st.info(f"🎯 Overall Progress: {current_index}/{len(TOPICS)} topics completed")
+    
+    # Show current topic
+    if st.session_state.turn_count < len(session_topics):
+        current_topic = session_topics[st.session_state.turn_count]
+        st.success(f"**Current Topic:** {current_topic}")
+        st.caption("💡 Not there yet in class? Click 'Haven't Learned This Yet' - it won't affect your grade!")
     
     # Display chat messages
     for message in st.session_state.messages:
@@ -221,20 +267,51 @@ Start the interview with your first question about Simple Harmonic Motion."""
     
     # Check if interview is complete
     if st.session_state.interview_complete:
-        st.success("✅ Interview completed and graded!")
-        if st.button("Start New Interview"):
-            for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'student_id', 'current_topic_index']:
+        st.success("✅ Session completed and graded!")
+        if st.button("Start New Session"):
+            for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
         return
     
-    # Show turn counter and finish button
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.caption(f"Question {st.session_state.turn_count + 1}/{len(TOPICS)}")
+    # Show finish button and skip topic option
+    col1, col2, col3 = st.columns([2, 1.5, 1])
     with col2:
-        if st.button("🏁 Finish Interview"):
+        if st.button("📚 Haven't Learned This Yet", use_container_width=True):
+            # Skip the current topic without penalty
+            if st.session_state.turn_count < len(session_topics):
+                skipped_topic = session_topics[st.session_state.turn_count]
+                
+                # Add a message indicating the skip
+                skip_message = f"[Student hasn't learned: {skipped_topic} - Not yet covered in class]"
+                st.session_state.messages.append({
+                    "role": "user", 
+                    "content": skip_message
+                })
+                
+                # Increment counters
+                st.session_state.turn_count += 1
+                st.session_state.current_topic_index += 1
+                
+                # Check if session is complete
+                if st.session_state.turn_count >= len(session_topics):
+                    complete_interview()
+                    return
+                
+                # Move to next topic
+                next_topic = session_topics[st.session_state.turn_count]
+                instruction = f"The student has not covered {skipped_topic} yet in class. Move to the next topic: {next_topic}. Ask a question about {next_topic}."
+                response = st.session_state.chat.send_message(instruction)
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response.text
+                })
+                
+                st.rerun()
+    with col3:
+        if st.button("🏁 Finish Session", use_container_width=True):
             complete_interview()
             return
     
@@ -245,19 +322,20 @@ Start the interview with your first question about Simple Harmonic Motion."""
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Increment turn counter
+        # Increment turn counter and topic index
         st.session_state.turn_count += 1
+        st.session_state.current_topic_index += 1
         
-        # Check if we've covered all topics
-        if st.session_state.turn_count >= len(TOPICS):
+        # Check if we've completed this session (5 questions or all remaining topics)
+        if st.session_state.turn_count >= len(session_topics):
             complete_interview()
             return
         
-        # Get next topic
-        next_topic = TOPICS[st.session_state.turn_count]
+        # Get next topic in this session
+        next_topic = session_topics[st.session_state.turn_count]
         
         # Get AI response with instruction to move to next topic
-        follow_up_instruction = f"Good. Now move to the next topic: {next_topic}. Ask ONE clear question about {next_topic}."
+        follow_up_instruction = f"Good. Now move to the next topic in this session: {next_topic}. Ask ONE clear question about {next_topic}."
         response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
         assistant_message = response.text
         
@@ -278,15 +356,21 @@ def complete_interview():
     ])
     
     # Grade the transcript
-    with st.spinner("Grading your interview..."):
+    with st.spinner("Grading your session..."):
         score, status, feedback = grade_transcript(transcript)
     
-    # Save to database
-    save_interview(st.session_state.student_id, score, status, transcript)
+    # Save to database with updated topic index
+    save_interview(
+        st.session_state.student_id, 
+        score, 
+        status, 
+        transcript, 
+        st.session_state.current_topic_index
+    )
     
     # Display results
     st.balloons() if status == "Pass" else None
-    st.subheader("📋 Interview Results")
+    st.subheader("📋 Session Results")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -296,6 +380,34 @@ def complete_interview():
         st.metric("Status", f"{status_color} {status}")
     
     st.text_area("Detailed Feedback", feedback, height=150)
+    
+    # Show progress info
+    TOPICS = [
+        "Simple Harmonic Motion",
+        "Pendulum and Mass Spring",
+        "Wave form",
+        "Damped oscillation Damped Pendulum",
+        "Waves on a string",
+        "Standing Waves",
+        "Sound Waves",
+        "Doppler effect",
+        "Musical instruments",
+        "Light as a wave",
+        "Angular Resolution",
+        "Thin film",
+        "Polarization",
+        "Thermal Physics Black body",
+        "Light as a particle",
+        "Radioactivity",
+        "Relativity"
+    ]
+    
+    remaining = len(TOPICS) - st.session_state.current_topic_index
+    if remaining > 0:
+        st.info(f"📚 Progress: {st.session_state.current_topic_index}/{len(TOPICS)} topics completed. {remaining} topics remaining.")
+        st.write("Come back for your next session to continue!")
+    else:
+        st.success("🎉 Congratulations! You've completed all 17 topics!")
     
     st.rerun()
 
@@ -339,23 +451,57 @@ def main():
             st.title("🎓 Welcome Back!")
             
             last_interview = get_student_last_interview(st.session_state.student_id)
+            topic_progress = get_student_topic_progress(st.session_state.student_id)
+            
+            TOPICS = [
+                "Simple Harmonic Motion",
+                "Pendulum and Mass Spring",
+                "Wave form",
+                "Damped oscillation Damped Pendulum",
+                "Waves on a string",
+                "Standing Waves",
+                "Sound Waves",
+                "Doppler effect",
+                "Musical instruments",
+                "Light as a wave",
+                "Angular Resolution",
+                "Thin film",
+                "Polarization",
+                "Thermal Physics Black body",
+                "Light as a particle",
+                "Radioactivity",
+                "Relativity"
+            ]
             
             if last_interview:
                 st.write(f"**Student ID:** {st.session_state.student_id}")
-                st.write(f"**Last Interview:** {last_interview[2]}")  # date
+                st.write(f"**Last Session:** {last_interview[2]}")  # date
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("Previous Score", f"{last_interview[3]}/100")
+                    st.metric("Last Session Score", f"{last_interview[3]}/100")
                 with col2:
                     status_color = "🟢" if last_interview[4] == "Pass" else "🔴"
-                    st.metric("Previous Status", f"{status_color} {last_interview[4]}")
+                    st.metric("Last Session Status", f"{status_color} {last_interview[4]}")
+                
+                # Show progress
+                st.progress(topic_progress / len(TOPICS))
+                st.info(f"📚 Progress: {topic_progress}/{len(TOPICS)} topics completed")
+                
+                if topic_progress < len(TOPICS):
+                    remaining = min(5, len(TOPICS) - topic_progress)
+                    next_topics = TOPICS[topic_progress:topic_progress + remaining]
+                    st.success(f"**Next Session Topics ({remaining} questions):**")
+                    for i, topic in enumerate(next_topics, 1):
+                        st.write(f"{i}. {topic}")
+                else:
+                    st.success("🎉 You've completed all topics!")
                 
                 st.divider()
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("📝 Start New Interview", use_container_width=True):
+                    if st.button("📝 Continue to Next Session", use_container_width=True):
                         del st.session_state.show_previous_results
                         st.rerun()
                 with col2:
