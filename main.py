@@ -396,6 +396,39 @@ Start the conversation warmly! Greet the student and ask your first reflection q
             st.write(message["content"])
     
     if st.session_state.interview_complete:
+        # Show helpful learning resources for topics covered in this session
+        TOPIC_RESOURCES = {
+            "Simple Harmonic Motion": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/introduction-to-harmonic-motion", "Khan Academy — Intro to Harmonic Motion"),
+            "Pendulum and Mass Spring": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/pendulum", "Khan Academy — Pendulums & Springs"),
+            "Wave form": ("https://www.physicsclassroom.com/class/waves/Lesson-2/The-Anatomy-of-a-Wave", "The Physics Classroom — Anatomy of a Wave"),
+            "Damped oscillation Damped Pendulum": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/a/what-is-damped-harmonic-motion", "Khan Academy — Damped Harmonic Motion"),
+            "Waves on a string": ("https://phet.colorado.edu/en/simulations/wave-on-a-string", "PhET Simulation — Wave on a String"),
+            "Standing Waves": ("https://www.physicsclassroom.com/class/sound/Lesson-4/Standing-Wave-Patterns", "The Physics Classroom — Standing Waves"),
+            "Sound Waves": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/sound-topic/v/introduction-to-sound", "Khan Academy — Introduction to Sound"),
+            "Doppler effect": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/doppler-effect/v/doppler-effect-introduction", "Khan Academy — Doppler Effect"),
+            "Musical instruments": ("https://www.physicsclassroom.com/class/sound/Lesson-5/Musical-Instruments", "The Physics Classroom — Musical Instruments"),
+            "Light as a wave": ("https://www.khanacademy.org/science/physics/light-waves/introduction-to-light-waves/v/introduction-to-light", "Khan Academy — Light as a Wave"),
+            "Angular Resolution": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/single-slit-interference", "Khan Academy — Diffraction & Resolution"),
+            "Thin film": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/thin-film-interference", "Khan Academy — Thin Film Interference"),
+            "Polarization": ("https://www.physicsclassroom.com/class/light/Lesson-1/Polarization", "The Physics Classroom — Polarization"),
+            "Thermal Physics Black body": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/blackbody-radiation", "Khan Academy — Blackbody Radiation"),
+            "Light as a particle": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/photoelectric-effect", "Khan Academy — Photoelectric Effect"),
+            "Radioactivity": ("https://www.khanacademy.org/science/physics/quantum-physics/in-in-nuclear-physics/v/types-of-decay", "Khan Academy — Radioactive Decay"),
+            "Relativity": ("https://www.khanacademy.org/science/physics/special-relativity/einstein-velocity-addition/v/einstein-velocity-addition", "Khan Academy — Special Relativity"),
+        }
+        
+        TOPICS = list(TOPIC_RESOURCES.keys())
+        starting_index = st.session_state.starting_topic_index
+        session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
+        
+        st.divider()
+        st.write("📖 **Want to learn more? Check out these resources:**")
+        for topic in session_topics:
+            if topic in TOPIC_RESOURCES:
+                url, label = TOPIC_RESOURCES[topic]
+                st.markdown(f"- [{label}]({url})")
+        
+        st.write("")
         if st.button("Start New Session"):
             for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index']:
                 if key in st.session_state:
