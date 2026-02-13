@@ -162,26 +162,137 @@ Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet 
     return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade."
 
 def admin_panel():
-    """Display admin panel with all results"""
-    st.title("📊 Admin Panel - Session Results")
+    """Display admin panel with student summaries and transcript access"""
+    st.title("📊 Admin Panel")
+    
+    TOPICS = [
+        "Simple Harmonic Motion",
+        "Pendulum and Mass Spring",
+        "Wave form",
+        "Damped oscillation Damped Pendulum",
+        "Waves on a string",
+        "Standing Waves",
+        "Sound Waves",
+        "Doppler effect",
+        "Musical instruments",
+        "Light as a wave",
+        "Angular Resolution",
+        "Thin film",
+        "Polarization",
+        "Thermal Physics Black body",
+        "Light as a particle",
+        "Radioactivity",
+        "Relativity"
+    ]
     
     df = get_all_interviews()
     
     if df.empty:
         st.info("No session records found.")
-    else:
-        st.dataframe(df, use_container_width=True)
+        return
+    
+    # Check if we're viewing a specific student's transcripts
+    if 'admin_view_student' in st.session_state:
+        student_id = st.session_state.admin_view_student
+        st.subheader(f"📝 Conversations for: {student_id}")
         
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-        csv_data = csv_buffer.getvalue()
+        if st.button("← Back to Student List"):
+            del st.session_state.admin_view_student
+            st.rerun()
         
-        st.download_button(
-            label="📥 Download Results as CSV",
-            data=csv_data,
-            file_name=f"session_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+        student_df = df[df['student_id'] == student_id].sort_values('date', ascending=False)
+        
+        for _, row in student_df.iterrows():
+            with st.expander(f"Session: {row['date']} — Score: {row['score']}/100 ({row['status']}) — Topics up to #{row.get('topic_index', 'N/A')}"):
+                st.text_area(
+                    "Transcript",
+                    row['transcript'],
+                    height=400,
+                    key=f"transcript_{row['id']}",
+                    disabled=True
+                )
+        return
+    
+    # Build student summary table
+    st.subheader("Student Overview")
+    
+    summary_rows = []
+    for student_id in df['student_id'].unique():
+        if student_id == "ADMIN123":
+            continue
+        
+        student_data = df[df['student_id'] == student_id].sort_values('date', ascending=False)
+        latest = student_data.iloc[0]
+        
+        topic_index = int(latest.get('topic_index', 0))
+        total_sessions = len(student_data)
+        latest_score = int(latest['score'])
+        latest_status = latest['status']
+        last_date = latest['date']
+        
+        # Determine learning status
+        if topic_index >= len(TOPICS):
+            learning_status = "✅ Completed All Topics"
+        elif topic_index == 0:
+            learning_status = f"🔵 Just Started (0/{len(TOPICS)})"
+        else:
+            learning_status = f"🟡 In Progress ({topic_index}/{len(TOPICS)})"
+        
+        avg_score = round(student_data['score'].mean(), 1)
+        
+        summary_rows.append({
+            "Student ID": student_id,
+            "Learning Status": learning_status,
+            "Topics Completed": f"{topic_index}/{len(TOPICS)}",
+            "Total Sessions": total_sessions,
+            "Latest Score": f"{latest_score}/100",
+            "Avg Score": f"{avg_score}/100",
+            "Latest Status": latest_status,
+            "Last Active": last_date,
+        })
+    
+    if not summary_rows:
+        st.info("No student records found.")
+        return
+    
+    summary_df = pd.DataFrame(summary_rows)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    
+    # CSV download
+    csv_buffer = io.StringIO()
+    summary_df.to_csv(csv_buffer, index=False)
+    st.download_button(
+        label="📥 Download Summary as CSV",
+        data=csv_buffer.getvalue(),
+        file_name=f"student_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
+    
+    st.divider()
+    
+    # View conversations buttons
+    st.subheader("📝 View Student Conversations")
+    
+    student_ids = [s for s in df['student_id'].unique() if s != "ADMIN123"]
+    cols = st.columns(min(3, len(student_ids)))
+    
+    for i, sid in enumerate(student_ids):
+        with cols[i % 3]:
+            if st.button(f"🔍 {sid}", key=f"view_{sid}", use_container_width=True):
+                st.session_state.admin_view_student = sid
+                st.rerun()
+    
+    st.divider()
+    
+    # Full data download
+    csv_buffer_full = io.StringIO()
+    df.to_csv(csv_buffer_full, index=False)
+    st.download_button(
+        label="📥 Download Full Data (all transcripts) as CSV",
+        data=csv_buffer_full.getvalue(),
+        file_name=f"full_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
 
 def chat_interface(student_id):
     """Main chat interface for student reflection sessions"""
@@ -396,9 +507,11 @@ def main():
         st.title("🎓 Reflections on Waves and Modern Physics")
         st.write("Welcome! Please enter your Student ID to begin.")
         
-        student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
+        with st.form("login_form"):
+            student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
+            submitted = st.form_submit_button("Start Chat")
         
-        if st.button("Start Chat"):
+        if submitted:
             if student_id:
                 if student_id == "ADMIN123":
                     st.session_state.student_id = student_id
