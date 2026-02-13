@@ -162,6 +162,7 @@ Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet 
     
     return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade."
 
+
 def analyze_failure_reasons(transcript, score):
     """Use Gemini AI to analyze why a student failed"""
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -195,37 +196,12 @@ def admin_panel():
     """Display admin panel with all results"""
     st.title("📊 Admin Panel - Interview Results")
     
-    # Debug info
-    try:
-        df = get_all_interviews()
-        st.success(f"✅ Successfully loaded {len(df)} interview records from database")
-    except Exception as e:
-        st.error(f"❌ Error loading interviews: {str(e)}")
-        st.info("The database might be empty or corrupted. Try running a student interview first to create data.")
-        return
+    df = get_all_interviews()
     
     if df.empty:
-        st.info("📝 No interview records found. Start a student interview to see data here!")
+        st.info("No interview records found.")
     else:
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Interviews", len(df))
-        with col2:
-            pass_count = len(df[df['status'] == 'Pass'])
-            st.metric("Passed", pass_count)
-        with col3:
-            fail_count = len(df[df['status'] == 'Fail'])
-            st.metric("Failed", fail_count)
-        with col4:
-            avg_score = df['score'].mean()
-            st.metric("Avg Score", f"{avg_score:.1f}")
-        
-        st.divider()
-        
-        # Display dataframe
-        st.subheader("All Interview Results")
-        st.dataframe(df[['id', 'student_id', 'date', 'score', 'status', 'topic_index']], use_container_width=True)
+        st.dataframe(df, use_container_width=True)
         
         # Download CSV button
         csv_buffer = io.StringIO()
@@ -238,59 +214,10 @@ def admin_panel():
             file_name=f"interview_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
-        
-        st.divider()
-        
-        # Detailed review section - expandable for each failed interview
-        st.subheader("📋 Detailed Review - Failed Interviews")
-        
-        failed_interviews = df[df['status'] == 'Fail']
-        
-        if failed_interviews.empty:
-            st.success("✅ No failed interviews to review!")
-        else:
-            for idx, row in failed_interviews.iterrows():
-                with st.expander(f"🔍 Student {row['student_id']} - Score: {row['score']}/100 - Date: {row['date']}"):
-                    st.write(f"**Interview ID:** {row['id']}")
-                    st.write(f"**Topics Completed:** {row['topic_index']}/17")
-                    
-                    # Show transcript
-                    with st.expander("📄 View Full Transcript"):
-                        st.text_area("Transcript", row['transcript'], height=300, key=f"transcript_{row['id']}")
-                    
-                    # AI Analysis button
-                    if st.button(f"🤖 Generate AI Failure Analysis", key=f"analyze_{row['id']}"):
-                        with st.spinner("Analyzing interview with AI..."):
-                            analysis = analyze_failure_reasons(row['transcript'], row['score'])
-                            st.markdown("### 📊 AI Analysis Results")
-                            st.markdown(analysis)
-                            
-                    st.divider()
-        
-        # Optional: Review passed interviews
-        st.divider()
-        st.subheader("✅ Review Passed Interviews (Optional)")
-        
-        if st.checkbox("Show passed interviews for review"):
-            passed_interviews = df[df['status'] == 'Pass']
-            
-            if passed_interviews.empty:
-                st.info("No passed interviews yet.")
-            else:
-                for idx, row in passed_interviews.iterrows():
-                    with st.expander(f"✅ Student {row['student_id']} - Score: {row['score']}/100 - Date: {row['date']}"):
-                        st.write(f"**Interview ID:** {row['id']}")
-                        st.write(f"**Topics Completed:** {row['topic_index']}/17")
-                        
-                        # Show transcript
-                        with st.expander("📄 View Full Transcript"):
-                            st.text_area("Transcript", row['transcript'], height=300, key=f"transcript_pass_{row['id']}")
-                        
-                        st.divider()
 
 def chat_interface(student_id):
     """Main chat interface for student interviews"""
-    st.title("ðŸŽ“ Reflections on Waves and Modern Physics")
+    st.title("ðŸŽ“ AP Physics Interview Bot")
     st.write(f"**Student ID:** {student_id}")
     st.write("**Topic:** Waves and Modern Physics")
     st.divider()
@@ -385,10 +312,17 @@ Start the interview with your first question about {session_topics[0]}."""
     current_index = st.session_state.current_topic_index
     session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
     
-    # Show current topic only
+    # Display session progress
     session_question_num = st.session_state.turn_count + 1
     total_session_questions = len(session_topics)
     
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"📚 Session Progress: Question {session_question_num}/{total_session_questions}")
+    with col2:
+        st.info(f"🎯 Overall Progress: {current_index}/{len(TOPICS)} topics completed")
+    
+    # Show current topic
     if st.session_state.turn_count < len(session_topics):
         current_topic = session_topics[st.session_state.turn_count]
         st.success(f"**Current Topic:** {current_topic}")
@@ -412,7 +346,7 @@ Start the interview with your first question about {session_topics[0]}."""
     # Show finish button and skip topic option
     col1, col2, col3 = st.columns([2, 1.5, 1])
     with col2:
-        if st.button("ðŸ“š Haven't Learned This Yet", use_container_width=True):
+        if st.button("📚 Haven't Learned This Yet", use_container_width=True):
             # Skip the current topic without penalty
             if st.session_state.turn_count < len(session_topics):
                 skipped_topic = session_topics[st.session_state.turn_count]
@@ -504,8 +438,7 @@ def complete_interview():
     ])
     
     # Grade the transcript
-    with st.spinner("Grading your session..."):
-        score, status, feedback = grade_transcript(transcript)
+    score, status, feedback = grade_transcript(transcript)
     
     # Save to database with updated topic index
     save_interview(
@@ -524,7 +457,7 @@ def complete_interview():
     with col1:
         st.metric("Score", f"{score}/100")
     with col2:
-        status_color = "ðŸŸ¢" if status == "Pass" else "ðŸ”´"
+        status_color = "🟢" if status == "Pass" else "ðŸ”´"
         st.metric("Status", f"{status_color} {status}")
     
     st.text_area("Detailed Feedback", feedback, height=150)
@@ -552,9 +485,10 @@ def complete_interview():
     
     remaining = len(TOPICS) - st.session_state.current_topic_index
     if remaining > 0:
+        st.info(f"📚 Progress: {st.session_state.current_topic_index}/{len(TOPICS)} topics completed. {remaining} topics remaining.")
         st.write("Come back for your next session to continue!")
     else:
-        st.success("ðŸŽ‰ Congratulations! You've completed all topics!")
+        st.success("ðŸŽ‰ Congratulations! You've completed all 17 topics!")
     
     st.rerun()
 
@@ -567,33 +501,37 @@ def main():
     
     # Check if student ID is in session
     if 'student_id' not in st.session_state:
-        st.title("ðŸŽ“ Reflections on Waves and Modern Physics")
+        st.title("ðŸŽ“ AP Physics Interview Bot")
         st.write("Welcome! Please enter your Student ID to begin.")
         
-        student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
+        student_id = st.text_input("Student ID:", placeholder="Enter your Student ID", key="student_id_input")
         
-        if st.button("Start Interview"):
-            if student_id:
+        # Auto-submit on Enter key
+        if student_id and student_id.strip():
+            # Check if admin
+            if student_id.strip() == "ADMIN123":
+                st.session_state.student_id = student_id.strip()
+                st.session_state.is_admin = True
+                st.rerun()
+            else:
+                # Regular student - go directly to interview
+                st.session_state.student_id = student_id.strip()
+                st.rerun()
+        
+        if st.button("Start Interview", use_container_width=True):
+            if student_id and student_id.strip():
                 # Check if admin
-                if student_id == "ADMIN123":
-                    st.session_state.student_id = student_id
-                    st.session_state.is_admin = True  # Flag as admin
+                if student_id.strip() == "ADMIN123":
+                    st.session_state.student_id = student_id.strip()
+                    st.session_state.is_admin = True
                     st.rerun()
                 else:
-                    # Check for previous interview
-                    last_interview = get_student_last_interview(student_id)
-                    
-                    if last_interview:
-                        st.session_state.student_id = student_id
-                        st.rerun()
-                    else:
-                        # New student - start interview
-                        st.session_state.student_id = student_id
-                        st.rerun()
+                    # Regular student - go directly to interview
+                    st.session_state.student_id = student_id.strip()
+                    st.rerun()
             else:
                 st.error("Please enter a Student ID")
     else:
-        # Route to admin panel or student interview
         # Check if admin
         if st.session_state.get('is_admin', False) or st.session_state.student_id == "ADMIN123":
             admin_panel()
