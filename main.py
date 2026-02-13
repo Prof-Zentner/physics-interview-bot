@@ -6,13 +6,19 @@ from datetime import datetime
 import pandas as pd
 import io
 
-# Configure Gemini API
-API_KEY = os.environ.get("GEMINI_API_KEY")
-if not API_KEY:
-    st.error("âš ï¸ API Key not found! Please contact the administrator.")
+# Configure API Keys
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+if not GEMINI_API_KEY:
+    st.error("⚠️ Gemini API Key not found! Please set the GEMINI_API_KEY environment variable.")
     st.stop()
 
-genai.configure(api_key=API_KEY)
+if not ANTHROPIC_API_KEY:
+    st.warning("ℹ️ Anthropic (Claude) API Key not set. Set ANTHROPIC_API_KEY environment variable if needed.")
+
+# Configure Gemini for chat and grading
+genai.configure(api_key=GEMINI_API_KEY)
 
 # Database setup
 DB_NAME = "interview_results.db"
@@ -22,7 +28,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Create table if it doesn't exist
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS interviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +40,6 @@ def init_db():
         )
     ''')
     
-    # Check if topic_index column exists, add it if it doesn't
     cursor.execute("PRAGMA table_info(interviews)")
     columns = [column[1] for column in cursor.fetchall()]
     
@@ -92,9 +96,8 @@ def get_student_topic_progress(student_id):
     result = cursor.fetchone()
     conn.close()
     if result:
-        # Return the next topic index (the one after the last completed session)
         return result[0]
-    return 0  # Start from beginning if no history
+    return 0
 
 def grade_transcript(transcript):
     """Use Gemini AI to grade the interview transcript"""
@@ -103,9 +106,9 @@ def grade_transcript(transcript):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     grading_prompt = f"""
-You are a physics teacher grading an AP Physics interview about Waves and Modern Physics.
+You are a physics teacher grading an AP Physics reflection chat about Waves and Modern Physics.
 
-Below is the complete transcript of a student interview session:
+Below is the complete transcript of a student session:
 
 {transcript}
 
@@ -129,14 +132,12 @@ Status: [Pass/Fail]
 Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet covered]
 """
     
-    # Try grading with retry on rate limit
     max_retries = 3
     for attempt in range(max_retries):
         try:
             response = model.generate_content(grading_prompt)
             result_text = response.text
             
-            # Parse the response
             score = 0
             status = "Fail"
             
@@ -151,48 +152,44 @@ Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet 
         except Exception as e:
             if "ResourceExhausted" in str(e) or "429" in str(e):
                 if attempt < max_retries - 1:
-                    time.sleep(5)  # Wait 5 seconds before retry
+                    time.sleep(5)
                     continue
                 else:
-                    # Return default passing grade if can't grade
                     return 75, "Pass", "Unable to grade due to API limits. Session saved with default passing grade. Your instructor can review the transcript."
             else:
-                # Other error - return default
                 return 75, "Pass", f"Grading error: {str(e)[:100]}. Session saved with default passing grade."
     
     return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade."
 
 def admin_panel():
     """Display admin panel with all results"""
-    st.title("ðŸ“Š Admin Panel - Interview Results")
+    st.title("📊 Admin Panel - Session Results")
     
     df = get_all_interviews()
     
     if df.empty:
-        st.info("No interview records found.")
+        st.info("No session records found.")
     else:
         st.dataframe(df, use_container_width=True)
         
-        # Download CSV button
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
         csv_data = csv_buffer.getvalue()
         
         st.download_button(
-            label="ðŸ“¥ Download Results as CSV",
+            label="📥 Download Results as CSV",
             data=csv_data,
-            file_name=f"interview_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"session_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
 
 def chat_interface(student_id):
-    """Main chat interface for student interviews"""
-    st.title("ðŸŽ“ AP Physics Interview Bot")
+    """Main chat interface for student reflection sessions"""
+    st.title("🎓 AP Physics Reflection Chat")
     st.write(f"**Student ID:** {student_id}")
     st.write("**Topic:** Waves and Modern Physics")
     st.divider()
     
-    # Define the topic progression
     TOPICS = [
         "Simple Harmonic Motion",
         "Pendulum and Mass Spring",
@@ -219,62 +216,67 @@ def chat_interface(student_id):
         st.session_state.turn_count = 0
         st.session_state.interview_complete = False
         
-        # Get where student left off
         starting_topic_index = get_student_topic_progress(student_id)
         st.session_state.starting_topic_index = starting_topic_index
         st.session_state.current_topic_index = starting_topic_index
         
-        # Check if all topics are completed
         if starting_topic_index >= len(TOPICS):
-            st.success("ðŸŽ‰ Congratulations! You've completed all topics!")
+            st.success("🎉 Congratulations! You've completed all topics!")
             st.info("All 17 topics have been covered. Great work!")
             if st.button("Start Over from Beginning"):
-                # Reset their progress
                 st.session_state.starting_topic_index = 0
                 st.session_state.current_topic_index = 0
                 st.rerun()
             return
         
-        # Initialize AI conversation
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
             st.session_state.chat = model.start_chat(history=[])
             
-            # Determine which topics for this session
             session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
             
-            # Send initial system message with topic progression
-            initial_prompt = f"""You are an AP Physics teacher interviewing a grade 12 student about Waves and Modern Physics. 
+            # Friendly Socratic reflection prompt
+            initial_prompt = f"""You are a warm, friendly, and encouraging AP Physics learning companion having a reflective conversation with a grade 12 student about Waves and Modern Physics.
+
+YOUR PERSONALITY & STYLE:
+- You are NOT a strict interviewer or examiner. You are a supportive friend who loves physics and wants to help the student think deeply.
+- Use a warm, conversational tone — like a friendly tutor chatting over coffee.
+- Celebrate what the student knows! Say things like "That's a great way to think about it!" or "I love how you connected those ideas!"
+- When a student struggles, gently guide them with hints rather than just moving on. Say things like "You're on the right track! What if you think about it this way..." or "No worries — let's explore this together."
+- Use real-world examples and analogies to make physics feel alive and relatable.
+- Ask follow-up reflection questions like "What surprised you about that?" or "How does that connect to what you already know?"
+- Keep it light and fun — sprinkle in enthusiasm! Physics is amazing and you want the student to feel that.
+- Use emojis occasionally to keep things friendly 😊🌊✨
 
 CRITICAL INSTRUCTIONS - THIS SESSION'S TOPICS:
-This is a 5-question session. You MUST ask questions following this exact order for THIS session:
+This is a 5-question session. You MUST cover these topics in order for THIS session:
 {chr(10).join([f"{i+1}. {topic}" for i, topic in enumerate(session_topics)])}
 
 The student has already completed topics 1-{starting_topic_index} in previous sessions.
 
 RULES:
 - Start with topic: {session_topics[0]}
-- Ask ONE clear, focused question about each topic in order
-- After the student answers, move to the NEXT topic in the session list
+- Ask ONE warm, thought-provoking question about each topic in order
+- After the student answers, briefly acknowledge their response with encouragement, then transition naturally to the NEXT topic
 - Do NOT skip topics or go out of order
-- Be encouraging but test their understanding thoroughly
-- Each question should probe their conceptual understanding of that specific topic
+- Frame questions as reflections: "What do you think happens when..." or "How would you explain ... to a friend?"
+- Make each question feel like a natural part of a conversation, not a test
 - This session will cover {len(session_topics)} topics
 
-Start the interview with your first question about {session_topics[0]}."""
+Start the conversation warmly! Greet the student, let them know what you'll be chatting about today, and ask your first reflection question about {session_topics[0]}."""
             
             response = st.session_state.chat.send_message(initial_prompt)
-            first_question = st.session_state.chat.send_message(f"Ask your first question about {session_topics[0]}.")
+            first_question = st.session_state.chat.send_message(f"Now greet the student warmly and ask your first friendly reflection question about {session_topics[0]}. Remember to be conversational and encouraging!")
             
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": first_question.text
             })
         except Exception as e:
-            st.error("âš ï¸ API Error: Unable to start the interview. This might be due to rate limits.")
+            st.error("⚠️ API Error: Unable to start the session. This might be due to rate limits.")
             st.info("Please wait a few minutes and try again, or contact your instructor.")
             if "ResourceExhausted" in str(e) or "429" in str(e):
-                st.warning("ðŸ• The API has reached its rate limit. Please wait 1-2 minutes before starting a new session.")
+                st.warning("🕐 The API has reached its rate limit. Please wait 1-2 minutes before starting a new session.")
             return
     
     # Get session info
@@ -282,30 +284,27 @@ Start the interview with your first question about {session_topics[0]}."""
     current_index = st.session_state.current_topic_index
     session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
     
-    # Display session progress
     session_question_num = st.session_state.turn_count + 1
     total_session_questions = len(session_topics)
     
     col1, col2 = st.columns(2)
     with col1:
-        st.info(f"ðŸ“š Session Progress: Question {session_question_num}/{total_session_questions}")
+        st.info(f"📚 Session Progress: Topic {session_question_num}/{total_session_questions}")
     with col2:
-        st.info(f"ðŸŽ¯ Overall Progress: {current_index}/{len(TOPICS)} topics completed")
+        st.info(f"🎯 Overall Progress: {current_index}/{len(TOPICS)} topics completed")
     
-    # Show current topic
     if st.session_state.turn_count < len(session_topics):
         current_topic = session_topics[st.session_state.turn_count]
         st.success(f"**Current Topic:** {current_topic}")
-        st.caption("ðŸ’¡ Not there yet in class? Click 'Haven't Learned This Yet' - it won't affect your grade!")
+        st.caption("💡 Not there yet in class? Click 'Haven't Learned This Yet' — no worries, it won't affect your grade!")
     
     # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.write(message["content"])
     
-    # Check if interview is complete
     if st.session_state.interview_complete:
-        st.success("âœ… Session completed and graded!")
+        st.success("✅ Session completed and graded!")
         if st.button("Start New Session"):
             for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index']:
                 if key in st.session_state:
@@ -316,31 +315,26 @@ Start the interview with your first question about {session_topics[0]}."""
     # Show finish button and skip topic option
     col1, col2, col3 = st.columns([2, 1.5, 1])
     with col2:
-        if st.button("ðŸ“š Haven't Learned This Yet", use_container_width=True):
-            # Skip the current topic without penalty
+        if st.button("📚 Haven't Learned This Yet", use_container_width=True):
             if st.session_state.turn_count < len(session_topics):
                 skipped_topic = session_topics[st.session_state.turn_count]
                 
-                # Add a message indicating the skip
                 skip_message = f"[Student hasn't learned: {skipped_topic} - Not yet covered in class]"
                 st.session_state.messages.append({
                     "role": "user", 
                     "content": skip_message
                 })
                 
-                # Increment counters
                 st.session_state.turn_count += 1
                 st.session_state.current_topic_index += 1
                 
-                # Check if session is complete
                 if st.session_state.turn_count >= len(session_topics):
                     complete_interview()
                     return
                 
-                # Move to next topic
                 next_topic = session_topics[st.session_state.turn_count]
                 try:
-                    instruction = f"The student has not covered {skipped_topic} yet in class. Move to the next topic: {next_topic}. Ask a question about {next_topic}."
+                    instruction = f"The student hasn't covered {skipped_topic} yet in class — that's totally fine! Warmly reassure them and smoothly transition to the next topic: {next_topic}. Ask a friendly reflection question about {next_topic}."
                     response = st.session_state.chat.send_message(instruction)
                     
                     st.session_state.messages.append({
@@ -350,37 +344,32 @@ Start the interview with your first question about {session_topics[0]}."""
                     
                     st.rerun()
                 except Exception as e:
-                    st.error("âš ï¸ API Error: Unable to skip to next topic.")
+                    st.error("⚠️ API Error: Unable to skip to next topic.")
                     if "ResourceExhausted" in str(e) or "429" in str(e):
-                        st.warning("ðŸ• Rate limit reached. Please wait 1-2 minutes and try again.")
+                        st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and try again.")
                     st.info("You can click 'Finish Session' to save your progress.")
     with col3:
-        if st.button("ðŸ Finish Session", use_container_width=True):
+        if st.button("🏁 Finish Session", use_container_width=True):
             complete_interview()
             return
     
     # Chat input
-    if prompt := st.chat_input("Type your answer here..."):
-        # Add user message
+    if prompt := st.chat_input("Share your thoughts here..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Increment turn counter and topic index
         st.session_state.turn_count += 1
         st.session_state.current_topic_index += 1
         
-        # Check if we've completed this session (5 questions or all remaining topics)
         if st.session_state.turn_count >= len(session_topics):
             complete_interview()
             return
         
-        # Get next topic in this session
         next_topic = session_topics[st.session_state.turn_count]
         
-        # Get AI response with instruction to move to next topic
         try:
-            follow_up_instruction = f"Good. Now move to the next topic in this session: {next_topic}. Ask ONE clear question about {next_topic}."
+            follow_up_instruction = f"Warmly acknowledge the student's answer with encouragement. Then naturally transition to the next topic: {next_topic}. Ask ONE friendly, thought-provoking reflection question about {next_topic}. Keep it conversational and supportive!"
             response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
             assistant_message = response.text
             
@@ -390,28 +379,24 @@ Start the interview with your first question about {session_topics[0]}."""
             
             st.rerun()
         except Exception as e:
-            st.error("âš ï¸ API Error: Unable to get next question.")
+            st.error("⚠️ API Error: Unable to get next question.")
             if "ResourceExhausted" in str(e) or "429" in str(e):
-                st.warning("ðŸ• Rate limit reached. Please wait 1-2 minutes and click 'Finish Session' to save your progress.")
+                st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and click 'Finish Session' to save your progress.")
             else:
                 st.info("Please try clicking 'Finish Session' to save your progress so far.")
-            # Don't increment further - let them finish the session
 
 def complete_interview():
-    """Complete the interview and grade it"""
+    """Complete the session and grade it"""
     st.session_state.interview_complete = True
     
-    # Build transcript
     transcript = "\n\n".join([
-        f"{'AI Interviewer' if msg['role'] == 'assistant' else 'Student'}: {msg['content']}"
+        f"{'AI Learning Companion' if msg['role'] == 'assistant' else 'Student'}: {msg['content']}"
         for msg in st.session_state.messages
     ])
     
-    # Grade the transcript (for instructor review only)
-    with st.spinner("Saving your session..."):
+    with st.spinner("Reviewing your session... ✨"):
         score, status, feedback = grade_transcript(transcript)
     
-    # Save to database with updated topic index
     save_interview(
         st.session_state.student_id, 
         score, 
@@ -420,15 +405,18 @@ def complete_interview():
         st.session_state.current_topic_index
     )
     
-    # Display results (no grade shown to students)
-    st.balloons()
-    st.subheader("✅ Session Complete!")
+    st.balloons() if status == "Pass" else None
+    st.subheader("📋 Session Results")
     
-    st.success("Great work! Your responses have been recorded and submitted for review.")
-    st.info("💡 Your instructor will review your session and provide feedback.")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Score", f"{score}/100")
+    with col2:
+        status_color = "🟢" if status == "Pass" else "🔴"
+        st.metric("Status", f"{status_color} {status}")
     
+    st.text_area("Detailed Feedback", feedback, height=150)
     
-    # Show progress info
     TOPICS = [
         "Simple Harmonic Motion",
         "Pendulum and Mass Spring",
@@ -451,35 +439,31 @@ def complete_interview():
     
     remaining = len(TOPICS) - st.session_state.current_topic_index
     if remaining > 0:
-        st.info(f"ðŸ“š Progress: {st.session_state.current_topic_index}/{len(TOPICS)} topics completed. {remaining} topics remaining.")
-        st.write("Come back for your next session to continue!")
+        st.info(f"📚 Progress: {st.session_state.current_topic_index}/{len(TOPICS)} topics completed. {remaining} topics remaining.")
+        st.write("Come back for your next session to continue! 🚀")
     else:
-        st.success("ðŸŽ‰ Congratulations! You've completed all 17 topics!")
+        st.success("🎉 Congratulations! You've completed all 17 topics!")
     
     st.rerun()
 
 def main():
     """Main application logic"""
-    st.set_page_config(page_title="AP Physics Interview Bot", page_icon="ðŸŽ“", layout="wide")
+    st.set_page_config(page_title="AP Physics Reflection Chat", page_icon="🎓", layout="wide")
     
-    # Initialize database
     init_db()
     
-    # Check if student ID is in session
     if 'student_id' not in st.session_state:
-        st.title("ðŸŽ“ AP Physics Interview Bot")
+        st.title("🎓 AP Physics Reflection Chat")
         st.write("Welcome! Please enter your Student ID to begin.")
         
         student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
         
-        if st.button("Start Interview"):
+        if st.button("Start Chat"):
             if student_id:
-                # Check if admin
                 if student_id == "ADMIN123":
                     st.session_state.student_id = student_id
                     st.rerun()
                 else:
-                    # Check for previous interview
                     last_interview = get_student_last_interview(student_id)
                     
                     if last_interview:
@@ -487,15 +471,13 @@ def main():
                         st.session_state.show_previous_results = True
                         st.rerun()
                     else:
-                        # New student - start interview
                         st.session_state.student_id = student_id
                         st.rerun()
             else:
                 st.error("Please enter a Student ID")
     else:
-        # Check if we need to show previous results
         if hasattr(st.session_state, 'show_previous_results') and st.session_state.show_previous_results:
-            st.title("ðŸŽ“ Welcome Back!")
+            st.title("🎓 Welcome Back!")
             
             last_interview = get_student_last_interview(st.session_state.student_id)
             topic_progress = get_student_topic_progress(st.session_state.student_id)
@@ -522,12 +504,17 @@ def main():
             
             if last_interview:
                 st.write(f"**Student ID:** {st.session_state.student_id}")
-                st.write(f"**Last Session:** {last_interview[2]}")  # date
-                st.success("✅ Your last session was successfully submitted!")
+                st.write(f"**Last Session:** {last_interview[2]}")
                 
-                # Show progress
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Last Session Score", f"{last_interview[3]}/100")
+                with col2:
+                    status_color = "🟢" if last_interview[4] == "Pass" else "🔴"
+                    st.metric("Last Session Status", f"{status_color} {last_interview[4]}")
+                
                 st.progress(topic_progress / len(TOPICS))
-                st.info(f"ðŸ“š Progress: {topic_progress}/{len(TOPICS)} topics completed")
+                st.info(f"📚 Progress: {topic_progress}/{len(TOPICS)} topics completed")
                 
                 if topic_progress < len(TOPICS):
                     remaining = min(5, len(TOPICS) - topic_progress)
@@ -536,24 +523,23 @@ def main():
                     for i, topic in enumerate(next_topics, 1):
                         st.write(f"{i}. {topic}")
                 else:
-                    st.success("ðŸŽ‰ You've completed all topics!")
+                    st.success("🎉 You've completed all topics!")
                 
                 st.divider()
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("ðŸ“ Continue to Next Session", use_container_width=True):
+                    if st.button("🔁 Continue to Next Session", use_container_width=True):
                         del st.session_state.show_previous_results
                         st.rerun()
                 with col2:
-                    if st.button("ðŸ‘‹ Logout", use_container_width=True):
+                    if st.button("👋 Logout", use_container_width=True):
                         for key in list(st.session_state.keys()):
                             del st.session_state[key]
                         st.rerun()
             else:
                 del st.session_state.show_previous_results
                 st.rerun()
-        # Check if admin
         elif st.session_state.student_id == "ADMIN123":
             admin_panel()
         else:
