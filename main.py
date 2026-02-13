@@ -205,10 +205,17 @@ def admin_panel():
     
     st.title("📊 Admin Panel - Interview Results")
     
-    df = get_all_interviews()
+    # Debug info
+    try:
+        df = get_all_interviews()
+        st.success(f"✅ Successfully loaded {len(df)} interview records from database")
+    except Exception as e:
+        st.error(f"❌ Error loading interviews: {str(e)}")
+        st.info("The database might be empty or corrupted. Try running a student interview first to create data.")
+        return
     
     if df.empty:
-        st.info("No interview records found.")
+        st.info("📝 No interview records found. Start a student interview to see data here!")
     else:
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
