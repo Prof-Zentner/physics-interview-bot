@@ -121,8 +121,8 @@ CRITICAL GRADING INSTRUCTIONS:
 - Base the grade purely on the quality of the responses given in this session
 
 Score from 0-100 based on:
-- Correctness of the student's answers in this session (50%)
-- Depth of understanding shown in this session (30%)
+- Correctness of the student's answers in this session (40%)
+- Depth of understanding shown in this session (40%)
 - Quality of explanations given in this session (20%)
 
 Status: "Pass" if score >= 60, otherwise "Fail"
