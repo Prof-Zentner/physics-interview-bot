@@ -36,7 +36,10 @@ def init_db():
             score INTEGER NOT NULL,
             status TEXT NOT NULL,
             transcript TEXT NOT NULL,
-            topic_index INTEGER DEFAULT 0
+            topic_index INTEGER DEFAULT 0,
+            correctness INTEGER DEFAULT 0,
+            understanding INTEGER DEFAULT 0,
+            explanation INTEGER DEFAULT 0
         )
     ''')
     
@@ -45,20 +48,25 @@ def init_db():
     
     if 'topic_index' not in columns:
         cursor.execute('ALTER TABLE interviews ADD COLUMN topic_index INTEGER DEFAULT 0')
-        conn.commit()
+    if 'correctness' not in columns:
+        cursor.execute('ALTER TABLE interviews ADD COLUMN correctness INTEGER DEFAULT 0')
+    if 'understanding' not in columns:
+        cursor.execute('ALTER TABLE interviews ADD COLUMN understanding INTEGER DEFAULT 0')
+    if 'explanation' not in columns:
+        cursor.execute('ALTER TABLE interviews ADD COLUMN explanation INTEGER DEFAULT 0')
     
     conn.commit()
     conn.close()
 
-def save_interview(student_id, score, status, transcript, topic_index):
+def save_interview(student_id, score, status, transcript, topic_index, correctness=0, understanding=0, explanation=0):
     """Save interview results to database"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute('''
-        INSERT INTO interviews (student_id, date, score, status, transcript, topic_index)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (student_id, date, score, status, transcript, topic_index))
+        INSERT INTO interviews (student_id, date, score, status, transcript, topic_index, correctness, understanding, explanation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (student_id, date, score, status, transcript, topic_index, correctness, understanding, explanation))
     conn.commit()
     conn.close()
 
@@ -100,7 +108,7 @@ def get_student_topic_progress(student_id):
     return 0
 
 def grade_transcript(transcript):
-    """Use Gemini AI to grade the interview transcript"""
+    """Use Gemini AI to grade the interview transcript with 40/40/20 breakdown"""
     import time
     
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -120,15 +128,18 @@ CRITICAL GRADING INSTRUCTIONS:
 - Do NOT penalize for fewer questions answered — quality matters, not quantity
 - Base the grade purely on the quality of the responses given in this session
 
-Score from 0-100 based on:
-- Correctness of the student's answers in this session (40%)
-- Depth of understanding shown in this session (40%)
-- Quality of explanations given in this session (20%)
+Grade each component out of 100, then compute the weighted total:
+- Correctness: How accurate are the student's physics answers? (weight: 40%)
+- Understanding: How deeply does the student grasp the concepts? (weight: 40%)
+- Explanation Quality: How well does the student articulate and explain ideas? (weight: 20%)
 
-Status: "Pass" if score >= 60, otherwise "Fail"
+Status: "Pass" if weighted total >= 60, otherwise "Fail"
 
-Respond in this exact format:
-Score: [number]
+Respond in this EXACT format (do not change the labels):
+Correctness: [number out of 100]
+Understanding: [number out of 100]
+Explanation: [number out of 100]
+Score: [weighted total out of 100]
 Status: [Pass/Fail]
 Feedback: [2-3 sentences about how the student did in THIS session specifically]
 """
@@ -141,14 +152,29 @@ Feedback: [2-3 sentences about how the student did in THIS session specifically]
             
             score = 0
             status = "Fail"
+            correctness = 0
+            understanding = 0
+            explanation = 0
             
             for line in result_text.split('\n'):
-                if line.startswith('Score:'):
-                    score = int(''.join(filter(str.isdigit, line)))
-                elif line.startswith('Status:'):
-                    status = line.split(':')[1].strip()
+                line_stripped = line.strip()
+                if line_stripped.startswith('Correctness:'):
+                    correctness = int(''.join(filter(str.isdigit, line_stripped.split(':')[1])))
+                elif line_stripped.startswith('Understanding:'):
+                    understanding = int(''.join(filter(str.isdigit, line_stripped.split(':')[1])))
+                elif line_stripped.startswith('Explanation:'):
+                    explanation = int(''.join(filter(str.isdigit, line_stripped.split(':')[1])))
+                elif line_stripped.startswith('Score:'):
+                    score = int(''.join(filter(str.isdigit, line_stripped.split(':')[1])))
+                elif line_stripped.startswith('Status:'):
+                    status = line_stripped.split(':')[1].strip()
             
-            return score, status, result_text
+            # Recalculate weighted score to ensure consistency
+            if correctness or understanding or explanation:
+                score = round(correctness * 0.4 + understanding * 0.4 + explanation * 0.2)
+                status = "Pass" if score >= 60 else "Fail"
+            
+            return score, status, result_text, correctness, understanding, explanation
             
         except Exception as e:
             if "ResourceExhausted" in str(e) or "429" in str(e):
@@ -156,11 +182,56 @@ Feedback: [2-3 sentences about how the student did in THIS session specifically]
                     time.sleep(5)
                     continue
                 else:
-                    return 75, "Pass", "Unable to grade due to API limits. Session saved with default passing grade. Your instructor can review the transcript."
+                    return 75, "Pass", "Unable to grade due to API limits. Session saved with default passing grade. Your instructor can review the transcript.", 0, 0, 0
             else:
-                return 75, "Pass", f"Grading error: {str(e)[:100]}. Session saved with default passing grade."
+                return 75, "Pass", f"Grading error: {str(e)[:100]}. Session saved with default passing grade.", 0, 0, 0
     
-    return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade."
+    return 75, "Pass", "Unable to grade after multiple attempts. Session saved with default passing grade.", 0, 0, 0
+
+def analyze_student_session(transcript, score, status):
+    """Use Gemini AI to generate a detailed analysis of why a student got their score"""
+    import time
+    
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    analysis_prompt = f"""You are a physics teacher analyzing a student's reflection chat session about Waves and Modern Physics.
+
+The student scored {score}/100 and received a status of "{status}".
+
+Here is the full transcript:
+
+{transcript}
+
+Please provide a detailed, constructive analysis covering:
+
+1. **Key Weaknesses**: What specific physics concepts did the student struggle with or get wrong? Give concrete examples from the transcript.
+2. **Misconceptions Identified**: Are there any physics misconceptions the student seems to hold? Be specific.
+3. **What They Did Well**: What topics or concepts did the student demonstrate good understanding of?
+4. **Breakdown Assessment**:
+   - Correctness (40%): How accurate were their answers? Which specific answers were incorrect?
+   - Understanding (40%): Did they show surface-level memorization or deep conceptual understanding?
+   - Explanation Quality (20%): Could they articulate their reasoning clearly?
+5. **Recommended Next Steps**: What should this student focus on to improve? Be specific about topics and suggest study strategies.
+
+Keep the tone constructive and helpful — this is for the teacher to understand how to help the student improve.
+"""
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(analysis_prompt)
+            return response.text
+        except Exception as e:
+            if "ResourceExhausted" in str(e) or "429" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                else:
+                    return "⚠️ Unable to generate analysis due to API rate limits. Please try again in a few minutes."
+            else:
+                return f"⚠️ Analysis error: {str(e)[:200]}"
+    
+    return "⚠️ Unable to generate analysis after multiple attempts. Please try again later."
 
 def admin_panel():
     """Display admin panel with student summaries and transcript access"""
@@ -199,19 +270,57 @@ def admin_panel():
         
         if st.button("← Back to Student List"):
             del st.session_state.admin_view_student
+            if 'analysis_results' in st.session_state:
+                del st.session_state.analysis_results
             st.rerun()
         
         student_df = df[df['student_id'] == student_id].sort_values('date', ascending=False)
         
         for _, row in student_df.iterrows():
+            row_id = row['id']
+            correctness = int(row.get('correctness', 0) or 0)
+            understanding = int(row.get('understanding', 0) or 0)
+            explanation_score = int(row.get('explanation', 0) or 0)
+            
             with st.expander(f"Session: {row['date']} — Score: {row['score']}/100 ({row['status']}) — Topics up to #{row.get('topic_index', 'N/A')}"):
+                
+                # Show 40/40/20 breakdown if available
+                if correctness or understanding or explanation_score:
+                    st.markdown("**📊 Score Breakdown (40/40/20):**")
+                    bc1, bc2, bc3 = st.columns(3)
+                    with bc1:
+                        st.metric("Correctness (40%)", f"{correctness}/100")
+                    with bc2:
+                        st.metric("Understanding (40%)", f"{understanding}/100")
+                    with bc3:
+                        st.metric("Explanation (20%)", f"{explanation_score}/100")
+                    st.caption(f"Weighted Total: {correctness}×0.4 + {understanding}×0.4 + {explanation_score}×0.2 = **{row['score']}/100**")
+                    st.divider()
+                
+                # Transcript
                 st.text_area(
                     "Transcript",
                     row['transcript'],
                     height=400,
-                    key=f"transcript_{row['id']}",
+                    key=f"transcript_{row_id}",
                     disabled=True
                 )
+                
+                # AI Analysis button
+                analysis_key = f"analysis_{row_id}"
+                if st.button(f"🔍 Analyze This Session", key=f"btn_analyze_{row_id}", use_container_width=True):
+                    with st.spinner("Generating AI analysis... This may take a moment."):
+                        analysis = analyze_student_session(row['transcript'], row['score'], row['status'])
+                        if 'analysis_results' not in st.session_state:
+                            st.session_state.analysis_results = {}
+                        st.session_state.analysis_results[analysis_key] = analysis
+                        st.rerun()
+                
+                # Display analysis if it exists
+                if 'analysis_results' in st.session_state and analysis_key in st.session_state.analysis_results:
+                    st.markdown("---")
+                    st.markdown("### 🔍 AI Analysis")
+                    st.markdown(st.session_state.analysis_results[analysis_key])
         return
     
     # Build student summary table
@@ -413,11 +522,11 @@ Now greet the student warmly and ask your first friendly reflection question abo
     starting_index = st.session_state.starting_topic_index
     session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
     
-    # Two-column layout: chat on left, keywords on right
-    chat_col, keyword_col = st.columns([3, 1])
-    
-    with keyword_col:
+    # Use sidebar for keywords so they persist properly
+    with st.sidebar:
         st.markdown("### 🔑 Key Terms")
+        st.caption("Use these terms to guide your reflections!")
+        st.divider()
         # Show keywords for current topic and previously covered topics in this session
         topics_so_far = session_topics[:st.session_state.turn_count + 1]
         for topic in topics_so_far:
@@ -430,93 +539,119 @@ Now greet the student warmly and ask your first friendly reflection question abo
         if not topics_so_far:
             st.caption("Keywords will appear here as you chat!")
     
-    with chat_col:
-        # Display chat messages
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.write(message["content"])
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
     
-        if st.session_state.interview_complete:
-            # Show helpful learning resources for topics covered in this session
-            TOPIC_RESOURCES = {
-                "Simple Harmonic Motion": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/introduction-to-harmonic-motion", "Khan Academy — Intro to Harmonic Motion"),
-                "Pendulum and Mass Spring": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/pendulum", "Khan Academy — Pendulums & Springs"),
-                "Wave form": ("https://www.physicsclassroom.com/class/waves/Lesson-2/The-Anatomy-of-a-Wave", "The Physics Classroom — Anatomy of a Wave"),
-                "Damped oscillation Damped Pendulum": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/a/what-is-damped-harmonic-motion", "Khan Academy — Damped Harmonic Motion"),
-                "Waves on a string": ("https://phet.colorado.edu/en/simulations/wave-on-a-string", "PhET Simulation — Wave on a String"),
-                "Standing Waves": ("https://www.physicsclassroom.com/class/sound/Lesson-4/Standing-Wave-Patterns", "The Physics Classroom — Standing Waves"),
-                "Sound Waves": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/sound-topic/v/introduction-to-sound", "Khan Academy — Introduction to Sound"),
-                "Doppler effect": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/doppler-effect/v/doppler-effect-introduction", "Khan Academy — Doppler Effect"),
-                "Musical instruments": ("https://www.physicsclassroom.com/class/sound/Lesson-5/Musical-Instruments", "The Physics Classroom — Musical Instruments"),
-                "Light as a wave": ("https://www.khanacademy.org/science/physics/light-waves/introduction-to-light-waves/v/introduction-to-light", "Khan Academy — Light as a Wave"),
-                "Angular Resolution": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/single-slit-interference", "Khan Academy — Diffraction & Resolution"),
-                "Thin film": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/thin-film-interference", "Khan Academy — Thin Film Interference"),
-                "Polarization": ("https://www.physicsclassroom.com/class/light/Lesson-1/Polarization", "The Physics Classroom — Polarization"),
-                "Thermal Physics Black body": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/blackbody-radiation", "Khan Academy — Blackbody Radiation"),
-                "Light as a particle": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/photoelectric-effect", "Khan Academy — Photoelectric Effect"),
-                "Radioactivity": ("https://www.khanacademy.org/science/physics/quantum-physics/in-in-nuclear-physics/v/types-of-decay", "Khan Academy — Radioactive Decay"),
-                "Relativity": ("https://www.khanacademy.org/science/physics/special-relativity/einstein-velocity-addition/v/einstein-velocity-addition", "Khan Academy — Special Relativity"),
-            }
-            
-            TOPICS = list(TOPIC_RESOURCES.keys())
-            starting_index = st.session_state.starting_topic_index
-            session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
-            
+    if st.session_state.interview_complete:
+        # Show grade breakdown if available
+        if 'grade_breakdown' in st.session_state:
+            gb = st.session_state.grade_breakdown
             st.divider()
-            st.write("📖 **Want to learn more? Check out these resources:**")
-            for topic in session_topics:
-                if topic in TOPIC_RESOURCES:
-                    url, label = TOPIC_RESOURCES[topic]
-                    st.markdown(f"- [{label}]({url})")
             
-            st.write("")
-            if st.button("Start New Session"):
-                for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
-            return
+            if gb['correctness'] or gb['understanding'] or gb['explanation']:
+                st.markdown("### 📊 Your Score Breakdown")
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                with sc1:
+                    st.metric("Correctness (40%)", f"{gb['correctness']}/100")
+                with sc2:
+                    st.metric("Understanding (40%)", f"{gb['understanding']}/100")
+                with sc3:
+                    st.metric("Explanation (20%)", f"{gb['explanation']}/100")
+                with sc4:
+                    st.metric("Total Score", f"{gb['score']}/100", delta=gb['status'])
+            else:
+                st.metric("Total Score", f"{gb['score']}/100", delta=gb['status'])
+            
+            # Show feedback
+            feedback_text = gb.get('feedback', '')
+            for line in feedback_text.split('\n'):
+                line_stripped = line.strip()
+                if line_stripped.startswith('Feedback:'):
+                    st.info(line_stripped.replace('Feedback:', '').strip())
+                    break
         
-        # Show skip and finish buttons
-        col1, col2, col3 = st.columns([2, 1.5, 1])
-        with col2:
-            if st.button("📚 Haven't Learned This Yet", use_container_width=True):
-                if st.session_state.turn_count < len(session_topics):
-                    skipped_topic = session_topics[st.session_state.turn_count]
+        # Show helpful learning resources for topics covered in this session
+        TOPIC_RESOURCES = {
+            "Simple Harmonic Motion": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/introduction-to-harmonic-motion", "Khan Academy — Intro to Harmonic Motion"),
+            "Pendulum and Mass Spring": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/v/pendulum", "Khan Academy — Pendulums & Springs"),
+            "Wave form": ("https://www.physicsclassroom.com/class/waves/Lesson-2/The-Anatomy-of-a-Wave", "The Physics Classroom — Anatomy of a Wave"),
+            "Damped oscillation Damped Pendulum": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/harmonic-motion/a/what-is-damped-harmonic-motion", "Khan Academy — Damped Harmonic Motion"),
+            "Waves on a string": ("https://phet.colorado.edu/en/simulations/wave-on-a-string", "PhET Simulation — Wave on a String"),
+            "Standing Waves": ("https://www.physicsclassroom.com/class/sound/Lesson-4/Standing-Wave-Patterns", "The Physics Classroom — Standing Waves"),
+            "Sound Waves": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/sound-topic/v/introduction-to-sound", "Khan Academy — Introduction to Sound"),
+            "Doppler effect": ("https://www.khanacademy.org/science/physics/mechanical-waves-and-sound/doppler-effect/v/doppler-effect-introduction", "Khan Academy — Doppler Effect"),
+            "Musical instruments": ("https://www.physicsclassroom.com/class/sound/Lesson-5/Musical-Instruments", "The Physics Classroom — Musical Instruments"),
+            "Light as a wave": ("https://www.khanacademy.org/science/physics/light-waves/introduction-to-light-waves/v/introduction-to-light", "Khan Academy — Light as a Wave"),
+            "Angular Resolution": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/single-slit-interference", "Khan Academy — Diffraction & Resolution"),
+            "Thin film": ("https://www.khanacademy.org/science/physics/light-waves/interference-of-light-waves/v/thin-film-interference", "Khan Academy — Thin Film Interference"),
+            "Polarization": ("https://www.physicsclassroom.com/class/light/Lesson-1/Polarization", "The Physics Classroom — Polarization"),
+            "Thermal Physics Black body": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/blackbody-radiation", "Khan Academy — Blackbody Radiation"),
+            "Light as a particle": ("https://www.khanacademy.org/science/physics/quantum-physics/photons/v/photoelectric-effect", "Khan Academy — Photoelectric Effect"),
+            "Radioactivity": ("https://www.khanacademy.org/science/physics/quantum-physics/in-in-nuclear-physics/v/types-of-decay", "Khan Academy — Radioactive Decay"),
+            "Relativity": ("https://www.khanacademy.org/science/physics/special-relativity/einstein-velocity-addition/v/einstein-velocity-addition", "Khan Academy — Special Relativity"),
+        }
+        
+        TOPICS_RES = list(TOPIC_RESOURCES.keys())
+        starting_index = st.session_state.starting_topic_index
+        session_topics_res = TOPICS_RES[starting_index:min(starting_index + 5, len(TOPICS_RES))]
+        
+        st.divider()
+        st.write("📖 **Want to learn more? Check out these resources:**")
+        for topic in session_topics_res:
+            if topic in TOPIC_RESOURCES:
+                url, label = TOPIC_RESOURCES[topic]
+                st.markdown(f"- [{label}]({url})")
+        
+        st.write("")
+        if st.button("Start New Session"):
+            for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index', 'grade_breakdown']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+        return
+    
+    # Show skip and finish buttons
+    col1, col2, col3 = st.columns([2, 1.5, 1])
+    with col2:
+        if st.button("📚 Haven't Learned This Yet", use_container_width=True):
+            if st.session_state.turn_count < len(session_topics):
+                skipped_topic = session_topics[st.session_state.turn_count]
+                
+                skip_message = f"[Student hasn't learned: {skipped_topic} - Not yet covered in class]"
+                st.session_state.messages.append({
+                    "role": "user", 
+                    "content": skip_message
+                })
+                
+                st.session_state.turn_count += 1
+                st.session_state.current_topic_index += 1
+                
+                if st.session_state.turn_count >= len(session_topics):
+                    complete_interview()
+                    return
+                
+                next_topic = session_topics[st.session_state.turn_count]
+                try:
+                    instruction = f"The student hasn't covered {skipped_topic} yet in class — that's totally fine! Warmly reassure them and smoothly transition to the next topic: {next_topic}. Ask a friendly reflection question about {next_topic}. Do NOT mention topic numbers or progress."
+                    response = st.session_state.chat.send_message(instruction)
                     
-                    skip_message = f"[Student hasn't learned: {skipped_topic} - Not yet covered in class]"
                     st.session_state.messages.append({
-                        "role": "user", 
-                        "content": skip_message
+                        "role": "assistant",
+                        "content": response.text
                     })
                     
-                    st.session_state.turn_count += 1
-                    st.session_state.current_topic_index += 1
-                    
-                    if st.session_state.turn_count >= len(session_topics):
-                        complete_interview()
-                        return
-                    
-                    next_topic = session_topics[st.session_state.turn_count]
-                    try:
-                        instruction = f"The student hasn't covered {skipped_topic} yet in class — that's totally fine! Warmly reassure them and smoothly transition to the next topic: {next_topic}. Ask a friendly reflection question about {next_topic}. Do NOT mention topic numbers or progress."
-                        response = st.session_state.chat.send_message(instruction)
-                        
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": response.text
-                        })
-                        
-                        st.rerun()
-                    except Exception as e:
-                        st.error("⚠️ API Error: Unable to skip to next topic.")
-                        if "ResourceExhausted" in str(e) or "429" in str(e):
-                            st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and try again.")
-                        st.info("You can click 'Finish Session' to save your progress.")
-        with col3:
-            if st.button("🏁 Finish Session", use_container_width=True):
-                complete_interview()
-                return
+                    st.rerun()
+                except Exception as e:
+                    st.error("⚠️ API Error: Unable to skip to next topic.")
+                    if "ResourceExhausted" in str(e) or "429" in str(e):
+                        st.warning("🕐 Rate limit reached. Please wait 1-2 minutes and try again.")
+                    st.info("You can click 'Finish Session' to save your progress.")
+    with col3:
+        if st.button("🏁 Finish Session", use_container_width=True):
+            complete_interview()
+            return
     
     # Chat input
     if prompt := st.chat_input("Share your thoughts here..."):
@@ -560,14 +695,27 @@ def complete_interview():
     ])
     
     with st.spinner("Wrapping up... ✨"):
-        score, status, feedback = grade_transcript(transcript)
+        score, status, feedback, correctness, understanding, explanation = grade_transcript(transcript)
+    
+    # Store breakdown in session state for display
+    st.session_state.grade_breakdown = {
+        "correctness": correctness,
+        "understanding": understanding,
+        "explanation": explanation,
+        "score": score,
+        "status": status,
+        "feedback": feedback
+    }
     
     save_interview(
         st.session_state.student_id, 
         score, 
         status, 
         transcript, 
-        st.session_state.current_topic_index
+        st.session_state.current_topic_index,
+        correctness,
+        understanding,
+        explanation
     )
     
     st.rerun()
