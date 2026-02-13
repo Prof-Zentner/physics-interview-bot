@@ -1,14 +1,15 @@
-# AP Physics Interview Bot
+# AP Physics Reflection Chat
 
-A Streamlit-based interview bot that uses Google Gemini AI to conduct physics interviews with students and automatically grade their performance.
+A Streamlit-based friendly learning companion that uses Google Gemini AI to conduct reflective physics conversations with students and automatically grade their understanding.
 
 ## Features
 
-- **Student Interview Mode**: Interactive AI-powered interview about Waves and Modern Physics
+- **Friendly Socratic Reflection Chat**: Warm, encouraging AI-powered conversations about Waves and Modern Physics (powered by Gemini)
 - **Automatic Grading**: AI analyzes the complete transcript and provides a score (0-100) and Pass/Fail status
-- **Database Storage**: All interviews saved to SQLite database with student ID, date, score, and transcript
+- **Database Storage**: All sessions saved to SQLite database with student ID, date, score, and transcript
 - **Admin Panel**: View all results in a table and download as CSV (access with ID: ADMIN123)
-- **Turn Limit**: Interviews automatically end after 5 questions or manual finish
+- **Topic Progression**: 17 topics covered across multiple sessions (5 topics per session)
+- **Skip Topics**: Students can skip topics they haven't learned yet without penalty
 
 ## Setup
 
@@ -17,21 +18,24 @@ A Streamlit-based interview bot that uses Google Gemini AI to conduct physics in
    pip install -r requirements.txt
    ```
 
-2. **Set API Key as environment variable**:
+2. **Set API Keys as environment variables**:
    
    **Linux/Mac**:
    ```bash
-   export AIzaSyCxLVxwPeweZee6jhN-K4ZEa8s49Rp7Y20="your-actual-gemini-api-key"
+   export GEMINI_API_KEY="your-gemini-api-key"
+   export ANTHROPIC_API_KEY="your-anthropic-api-key"
    ```
    
    **Windows (Command Prompt)**:
    ```cmd
-   set AIzaSyCxLVxwPeweZee6jhN-K4ZEa8s49Rp7Y20=your-actual-gemini-api-key
+   set GEMINI_API_KEY=your-gemini-api-key
+   set ANTHROPIC_API_KEY=your-anthropic-api-key
    ```
    
    **Windows (PowerShell)**:
    ```powershell
-   $env:AIzaSyCxLVxwPeweZee6jhN-K4ZEa8s49Rp7Y20="your-actual-gemini-api-key"
+   $env:GEMINI_API_KEY="your-gemini-api-key"
+   $env:ANTHROPIC_API_KEY="your-anthropic-api-key"
    ```
 
 3. **Run the application**:
@@ -39,29 +43,26 @@ A Streamlit-based interview bot that uses Google Gemini AI to conduct physics in
    streamlit run main.py
    ```
 
+## API Key Usage
+
+| Key | Service | Used For |
+|-----|---------|----------|
+| `GEMINI_API_KEY` | Google Gemini | Live chat conversation & grading |
+| `ANTHROPIC_API_KEY` | Anthropic (Claude) | Reserved for future features |
+
 ## Usage
 
 ### Student Mode
 1. Enter your Student ID when prompted
-2. Answer AI questions about Waves and Modern Physics
-3. Continue for 5 turns or click "Finish Interview" when ready
+2. Chat with the friendly AI companion about physics topics
+3. Share your thoughts across 5 topics per session
 4. Receive your score, status, and detailed feedback
-5. Results are automatically saved to the database
+5. Come back to continue with the next set of topics
 
 ### Admin Mode
 1. Enter `ADMIN123` as the Student ID
-2. View all interview results in a table
+2. View all session results in a table
 3. Download results as CSV file
-
-## Database
-
-The application creates `interview_results.db` with the following structure:
-- `id`: Auto-incrementing primary key
-- `student_id`: Student identifier
-- `date`: Interview timestamp
-- `score`: Grade (0-100)
-- `status`: Pass/Fail
-- `transcript`: Complete conversation history
 
 ## Grading Criteria
 
@@ -70,11 +71,12 @@ The AI grades based on:
 - Understanding of concepts (30%)
 - Depth of explanations (20%)
 
-**Pass threshold**: Score ≥ 60
+**Pass threshold**: Score >= 60
 
 ## Technologies
 
 - **Streamlit**: Web interface
-- **Google Gemini AI**: Conversational AI and grading
+- **Google Gemini AI**: Conversational AI (friendly Socratic chat) and grading
+- **Anthropic Claude**: API key supported (reserved for future use)
 - **SQLite**: Local database storage
 - **Pandas**: Data manipulation and CSV export
