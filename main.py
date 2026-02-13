@@ -106,30 +106,31 @@ def grade_transcript(transcript):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     grading_prompt = f"""
-You are a physics teacher grading an reflection chat on Waves and Modern Physics about Waves and Modern Physics.
+You are a physics teacher grading a SINGLE reflection chat session about Waves and Modern Physics.
 
-Below is the complete transcript of a student session:
+Below is the transcript from THIS SESSION ONLY:
 
 {transcript}
 
-IMPORTANT GRADING INSTRUCTIONS:
-- If the transcript contains "[Student hasn't learned: X - Not yet covered in class]", DO NOT penalize the student for those topics
-- Only grade the student on topics they actually answered
-- Topics they haven't learned yet should be treated neutrally and NOT count against their score
-- The student should only be evaluated on material they have been taught
+CRITICAL GRADING INSTRUCTIONS:
+- Grade ONLY what happened in THIS session — do not consider any previous sessions or overall progress
+- If the student only answered 1 or 2 questions in this session, grade them ONLY on those 1 or 2 answers
+- If the transcript contains "[Student hasn't learned: X - Not yet covered in class]", IGNORE those topics entirely — they do not count for or against the student
+- A student who answers 1 question brilliantly should score just as high as someone who answers 5 questions brilliantly
+- Do NOT penalize for fewer questions answered — quality matters, not quantity
+- Base the grade purely on the quality of the responses given in this session
 
-Please analyze the student's responses and provide:
-1. A Score from 0-100 based on:
-   - Correctness of answers (50%)
-   - Understanding of concepts (30%)
-   - Depth of explanations (20%)
-   - ONLY for topics they answered (not topics they haven't learned)
-2. A Status: "Pass" if score >= 60, otherwise "Fail"
+Score from 0-100 based on:
+- Correctness of the student's answers in this session (50%)
+- Depth of understanding shown in this session (30%)
+- Quality of explanations given in this session (20%)
+
+Status: "Pass" if score >= 60, otherwise "Fail"
 
 Respond in this exact format:
 Score: [number]
 Status: [Pass/Fail]
-Feedback: [2-3 sentences explaining the grade, acknowledging any topics not yet covered]
+Feedback: [2-3 sentences about how the student did in THIS session specifically]
 """
     
     max_retries = 3
