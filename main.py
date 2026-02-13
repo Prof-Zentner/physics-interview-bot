@@ -106,7 +106,7 @@ def grade_transcript(transcript):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     grading_prompt = f"""
-You are a physics teacher grading an AP Physics reflection chat about Waves and Modern Physics.
+You are a physics teacher grading an reflection chat on Waves and Modern Physics about Waves and Modern Physics.
 
 Below is the complete transcript of a student session:
 
@@ -185,7 +185,7 @@ def admin_panel():
 
 def chat_interface(student_id):
     """Main chat interface for student reflection sessions"""
-    st.title("🎓 AP Physics Reflection Chat")
+    st.title("🎓 Reflections on Waves and Modern Physics")
     st.write(f"**Student ID:** {student_id}")
     st.divider()
     
@@ -231,7 +231,7 @@ def chat_interface(student_id):
             
             session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
             
-            initial_prompt = f"""You are a warm, friendly, and encouraging AP Physics learning companion having a reflective conversation with a grade 12 student about Waves and Modern Physics.
+            initial_prompt = f"""You are a warm, friendly, and encouraging physics learning companion having a reflective conversation with a grade 12 student about Waves and Modern Physics.
 
 YOUR PERSONALITY & STYLE:
 - You are NOT a strict interviewer or examiner. You are a supportive friend who loves physics and wants to help the student think deeply.
@@ -388,12 +388,12 @@ def complete_interview():
 
 def main():
     """Main application logic"""
-    st.set_page_config(page_title="AP Physics Reflection Chat", page_icon="🎓", layout="wide")
+    st.set_page_config(page_title="Reflections on Waves and Modern Physics", page_icon="🎓", layout="wide")
     
     init_db()
     
     if 'student_id' not in st.session_state:
-        st.title("🎓 AP Physics Reflection Chat")
+        st.title("🎓 Reflections on Waves and Modern Physics")
         st.write("Welcome! Please enter your Student ID to begin.")
         
         student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
