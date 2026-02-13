@@ -187,11 +187,6 @@ def admin_panel():
 
 def chat_interface(student_id):
     """Main chat interface for student interviews"""
-    st.title("ðŸŽ“ AP Physics Interview Bot")
-    st.write(f"**Student ID:** {student_id}")
-    st.write("**Topic:** Waves and Modern Physics")
-    st.divider()
-    
     # Define the topic progression
     TOPICS = [
         "Simple Harmonic Motion",
@@ -213,6 +208,36 @@ def chat_interface(student_id):
         "Relativity"
     ]
     
+    # Mobile-friendly sidebar with topic progress
+    with st.sidebar:
+        st.title("📚 Session Info")
+        st.write(f"**Student ID:** {student_id}")
+        st.write("**Topic:** Waves and Modern Physics")
+        st.divider()
+        
+        # Show topic checklist in sidebar
+        if 'current_topic_index' in st.session_state:
+            st.subheader("📋 Topic Progress")
+            completed = st.session_state.current_topic_index
+            for i, topic in enumerate(TOPICS):
+                if i < completed:
+                    st.success(f"✅ {i+1}. {topic}")
+                elif i == completed and 'turn_count' in st.session_state:
+                    st.info(f"▶️ {i+1}. {topic}")
+                else:
+                    st.text(f"⬜ {i+1}. {topic}")
+            
+            st.divider()
+            st.metric("Progress", f"{completed}/{len(TOPICS)}")
+        
+        # Logout button in sidebar
+        if st.button("👋 Logout", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Main content area
+    st.title("🎓 AP Physics Interview Bot")
     # Initialize session state
     if 'messages' not in st.session_state:
         st.session_state.messages = []
