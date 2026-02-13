@@ -218,7 +218,7 @@ def admin_panel():
     
     summary_rows = []
     for student_id in df['student_id'].unique():
-        if student_id == "ADMIN123":
+        if student_id.upper() == "ADMIN123":
             continue
         
         student_data = df[df['student_id'] == student_id].sort_values('date', ascending=False)
@@ -273,7 +273,7 @@ def admin_panel():
     # View conversations buttons
     st.subheader("📝 View Student Conversations")
     
-    student_ids = [s for s in df['student_id'].unique() if s != "ADMIN123"]
+    student_ids = [s for s in df['student_id'].unique() if s.upper() != "ADMIN123"]
     cols = st.columns(min(3, len(student_ids)))
     
     for i, sid in enumerate(student_ids):
@@ -507,22 +507,26 @@ def main():
         st.title("🎓 Reflections on Waves and Modern Physics")
         st.write("Welcome! Please enter your Student ID to begin.")
         
-        with st.form("login_form"):
-            student_id = st.text_input("Student ID:", placeholder="Enter your Student ID")
-            submitted = st.form_submit_button("Start Chat")
+        def on_student_id_submit():
+            sid = st.session_state.student_id_input.strip()
+            if sid:
+                st.session_state.student_id = sid
         
-        if submitted:
+        student_id = st.text_input(
+            "Student ID:", 
+            placeholder="Enter your Student ID", 
+            key="student_id_input",
+            on_change=on_student_id_submit
+        )
+        
+        if st.button("Start Chat"):
             if student_id:
-                if student_id == "ADMIN123":
-                    st.session_state.student_id = student_id
-                    st.rerun()
-                else:
-                    st.session_state.student_id = student_id
-                    st.rerun()
+                st.session_state.student_id = student_id.strip()
+                st.rerun()
             else:
                 st.error("Please enter a Student ID")
     else:
-        if st.session_state.student_id == "ADMIN123":
+        if st.session_state.student_id.upper() == "ADMIN123":
             admin_panel()
         else:
             chat_interface(st.session_state.student_id)
