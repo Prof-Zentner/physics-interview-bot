@@ -193,6 +193,16 @@ Format your response clearly with headers.
 
 def admin_panel():
     """Display admin panel with all results"""
+    # Clear sidebar for admin
+    with st.sidebar:
+        st.title("🔐 Admin Panel")
+        st.write("**Access Level:** Administrator")
+        st.divider()
+        if st.button("👋 Logout", use_container_width=True, key="admin_logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
     st.title("📊 Admin Panel - Interview Results")
     
     df = get_all_interviews()
@@ -608,6 +618,7 @@ def main():
                 # Check if admin
                 if student_id == "ADMIN123":
                     st.session_state.student_id = student_id
+                    st.session_state.is_admin = True  # Flag as admin
                     st.rerun()
                 else:
                     # Check for previous interview
@@ -691,7 +702,7 @@ def main():
                 del st.session_state.show_previous_results
                 st.rerun()
         # Check if admin
-        elif st.session_state.student_id == "ADMIN123":
+        elif st.session_state.get('is_admin', False) or st.session_state.student_id == "ADMIN123":
             admin_panel()
         else:
             chat_interface(st.session_state.student_id)
