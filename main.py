@@ -187,7 +187,6 @@ def chat_interface(student_id):
     """Main chat interface for student reflection sessions"""
     st.title("🎓 AP Physics Reflection Chat")
     st.write(f"**Student ID:** {student_id}")
-    st.write("**Topic:** Waves and Modern Physics")
     st.divider()
     
     TOPICS = [
@@ -221,13 +220,10 @@ def chat_interface(student_id):
         st.session_state.current_topic_index = starting_topic_index
         
         if starting_topic_index >= len(TOPICS):
-            st.success("🎉 Congratulations! You've completed all topics!")
-            st.info("All 17 topics have been covered. Great work!")
-            if st.button("Start Over from Beginning"):
-                st.session_state.starting_topic_index = 0
-                st.session_state.current_topic_index = 0
-                st.rerun()
-            return
+            # Silently restart from beginning
+            starting_topic_index = 0
+            st.session_state.starting_topic_index = 0
+            st.session_state.current_topic_index = 0
         
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
@@ -235,7 +231,6 @@ def chat_interface(student_id):
             
             session_topics = TOPICS[starting_topic_index:starting_topic_index + 5]
             
-            # Friendly Socratic reflection prompt
             initial_prompt = f"""You are a warm, friendly, and encouraging AP Physics learning companion having a reflective conversation with a grade 12 student about Waves and Modern Physics.
 
 YOUR PERSONALITY & STYLE:
@@ -247,26 +242,26 @@ YOUR PERSONALITY & STYLE:
 - Ask follow-up reflection questions like "What surprised you about that?" or "How does that connect to what you already know?"
 - Keep it light and fun — sprinkle in enthusiasm! Physics is amazing and you want the student to feel that.
 - Use emojis occasionally to keep things friendly 😊🌊✨
+- NEVER tell the student which topic number they are on, how many topics are left, or mention any progress tracking. Just have a natural conversation.
 
 CRITICAL INSTRUCTIONS - THIS SESSION'S TOPICS:
 This is a 5-question session. You MUST cover these topics in order for THIS session:
 {chr(10).join([f"{i+1}. {topic}" for i, topic in enumerate(session_topics)])}
-
-The student has already completed topics 1-{starting_topic_index} in previous sessions.
 
 RULES:
 - Start with topic: {session_topics[0]}
 - Ask ONE warm, thought-provoking question about each topic in order
 - After the student answers, briefly acknowledge their response with encouragement, then transition naturally to the NEXT topic
 - Do NOT skip topics or go out of order
+- Do NOT mention topic numbers, progress, or how many questions remain
 - Frame questions as reflections: "What do you think happens when..." or "How would you explain ... to a friend?"
 - Make each question feel like a natural part of a conversation, not a test
 - This session will cover {len(session_topics)} topics
 
-Start the conversation warmly! Greet the student, let them know what you'll be chatting about today, and ask your first reflection question about {session_topics[0]}."""
+Start the conversation warmly! Greet the student and ask your first reflection question about {session_topics[0]}."""
             
             response = st.session_state.chat.send_message(initial_prompt)
-            first_question = st.session_state.chat.send_message(f"Now greet the student warmly and ask your first friendly reflection question about {session_topics[0]}. Remember to be conversational and encouraging!")
+            first_question = st.session_state.chat.send_message(f"Now greet the student warmly and ask your first friendly reflection question about {session_topics[0]}. Remember to be conversational and encouraging! Do NOT mention topic numbers or progress.")
             
             st.session_state.messages.append({
                 "role": "assistant",
@@ -281,22 +276,7 @@ Start the conversation warmly! Greet the student, let them know what you'll be c
     
     # Get session info
     starting_index = st.session_state.starting_topic_index
-    current_index = st.session_state.current_topic_index
     session_topics = TOPICS[starting_index:min(starting_index + 5, len(TOPICS))]
-    
-    session_question_num = st.session_state.turn_count + 1
-    total_session_questions = len(session_topics)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info(f"📚 Session Progress: Topic {session_question_num}/{total_session_questions}")
-    with col2:
-        st.info(f"🎯 Overall Progress: {current_index}/{len(TOPICS)} topics completed")
-    
-    if st.session_state.turn_count < len(session_topics):
-        current_topic = session_topics[st.session_state.turn_count]
-        st.success(f"**Current Topic:** {current_topic}")
-        st.caption("💡 Not there yet in class? Click 'Haven't Learned This Yet' — no worries, it won't affect your grade!")
     
     # Display chat messages
     for message in st.session_state.messages:
@@ -304,7 +284,6 @@ Start the conversation warmly! Greet the student, let them know what you'll be c
             st.write(message["content"])
     
     if st.session_state.interview_complete:
-        st.success("✅ Session completed and graded!")
         if st.button("Start New Session"):
             for key in ['messages', 'turn_count', 'interview_complete', 'chat', 'starting_topic_index', 'current_topic_index']:
                 if key in st.session_state:
@@ -312,7 +291,7 @@ Start the conversation warmly! Greet the student, let them know what you'll be c
             st.rerun()
         return
     
-    # Show finish button and skip topic option
+    # Show skip and finish buttons
     col1, col2, col3 = st.columns([2, 1.5, 1])
     with col2:
         if st.button("📚 Haven't Learned This Yet", use_container_width=True):
@@ -334,7 +313,7 @@ Start the conversation warmly! Greet the student, let them know what you'll be c
                 
                 next_topic = session_topics[st.session_state.turn_count]
                 try:
-                    instruction = f"The student hasn't covered {skipped_topic} yet in class — that's totally fine! Warmly reassure them and smoothly transition to the next topic: {next_topic}. Ask a friendly reflection question about {next_topic}."
+                    instruction = f"The student hasn't covered {skipped_topic} yet in class — that's totally fine! Warmly reassure them and smoothly transition to the next topic: {next_topic}. Ask a friendly reflection question about {next_topic}. Do NOT mention topic numbers or progress."
                     response = st.session_state.chat.send_message(instruction)
                     
                     st.session_state.messages.append({
@@ -369,7 +348,7 @@ Start the conversation warmly! Greet the student, let them know what you'll be c
         next_topic = session_topics[st.session_state.turn_count]
         
         try:
-            follow_up_instruction = f"Warmly acknowledge the student's answer with encouragement. Then naturally transition to the next topic: {next_topic}. Ask ONE friendly, thought-provoking reflection question about {next_topic}. Keep it conversational and supportive!"
+            follow_up_instruction = f"Warmly acknowledge the student's answer with encouragement. Then naturally transition to the next topic: {next_topic}. Ask ONE friendly, thought-provoking reflection question about {next_topic}. Keep it conversational and supportive! Do NOT mention topic numbers or progress."
             response = st.session_state.chat.send_message(f"{prompt}\n\n[INSTRUCTION TO AI: {follow_up_instruction}]")
             assistant_message = response.text
             
@@ -394,7 +373,7 @@ def complete_interview():
         for msg in st.session_state.messages
     ])
     
-    with st.spinner("Reviewing your session... ✨"):
+    with st.spinner("Wrapping up... ✨"):
         score, status, feedback = grade_transcript(transcript)
     
     save_interview(
@@ -404,45 +383,6 @@ def complete_interview():
         transcript, 
         st.session_state.current_topic_index
     )
-    
-    st.balloons() if status == "Pass" else None
-    st.subheader("📋 Session Results")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Score", f"{score}/100")
-    with col2:
-        status_color = "🟢" if status == "Pass" else "🔴"
-        st.metric("Status", f"{status_color} {status}")
-    
-    st.text_area("Detailed Feedback", feedback, height=150)
-    
-    TOPICS = [
-        "Simple Harmonic Motion",
-        "Pendulum and Mass Spring",
-        "Wave form",
-        "Damped oscillation Damped Pendulum",
-        "Waves on a string",
-        "Standing Waves",
-        "Sound Waves",
-        "Doppler effect",
-        "Musical instruments",
-        "Light as a wave",
-        "Angular Resolution",
-        "Thin film",
-        "Polarization",
-        "Thermal Physics Black body",
-        "Light as a particle",
-        "Radioactivity",
-        "Relativity"
-    ]
-    
-    remaining = len(TOPICS) - st.session_state.current_topic_index
-    if remaining > 0:
-        st.info(f"📚 Progress: {st.session_state.current_topic_index}/{len(TOPICS)} topics completed. {remaining} topics remaining.")
-        st.write("Come back for your next session to continue! 🚀")
-    else:
-        st.success("🎉 Congratulations! You've completed all 17 topics!")
     
     st.rerun()
 
@@ -464,83 +404,12 @@ def main():
                     st.session_state.student_id = student_id
                     st.rerun()
                 else:
-                    last_interview = get_student_last_interview(student_id)
-                    
-                    if last_interview:
-                        st.session_state.student_id = student_id
-                        st.session_state.show_previous_results = True
-                        st.rerun()
-                    else:
-                        st.session_state.student_id = student_id
-                        st.rerun()
+                    st.session_state.student_id = student_id
+                    st.rerun()
             else:
                 st.error("Please enter a Student ID")
     else:
-        if hasattr(st.session_state, 'show_previous_results') and st.session_state.show_previous_results:
-            st.title("🎓 Welcome Back!")
-            
-            last_interview = get_student_last_interview(st.session_state.student_id)
-            topic_progress = get_student_topic_progress(st.session_state.student_id)
-            
-            TOPICS = [
-                "Simple Harmonic Motion",
-                "Pendulum and Mass Spring",
-                "Wave form",
-                "Damped oscillation Damped Pendulum",
-                "Waves on a string",
-                "Standing Waves",
-                "Sound Waves",
-                "Doppler effect",
-                "Musical instruments",
-                "Light as a wave",
-                "Angular Resolution",
-                "Thin film",
-                "Polarization",
-                "Thermal Physics Black body",
-                "Light as a particle",
-                "Radioactivity",
-                "Relativity"
-            ]
-            
-            if last_interview:
-                st.write(f"**Student ID:** {st.session_state.student_id}")
-                st.write(f"**Last Session:** {last_interview[2]}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Last Session Score", f"{last_interview[3]}/100")
-                with col2:
-                    status_color = "🟢" if last_interview[4] == "Pass" else "🔴"
-                    st.metric("Last Session Status", f"{status_color} {last_interview[4]}")
-                
-                st.progress(topic_progress / len(TOPICS))
-                st.info(f"📚 Progress: {topic_progress}/{len(TOPICS)} topics completed")
-                
-                if topic_progress < len(TOPICS):
-                    remaining = min(5, len(TOPICS) - topic_progress)
-                    next_topics = TOPICS[topic_progress:topic_progress + remaining]
-                    st.success(f"**Next Session Topics ({remaining} questions):**")
-                    for i, topic in enumerate(next_topics, 1):
-                        st.write(f"{i}. {topic}")
-                else:
-                    st.success("🎉 You've completed all topics!")
-                
-                st.divider()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🔁 Continue to Next Session", use_container_width=True):
-                        del st.session_state.show_previous_results
-                        st.rerun()
-                with col2:
-                    if st.button("👋 Logout", use_container_width=True):
-                        for key in list(st.session_state.keys()):
-                            del st.session_state[key]
-                        st.rerun()
-            else:
-                del st.session_state.show_previous_results
-                st.rerun()
-        elif st.session_state.student_id == "ADMIN123":
+        if st.session_state.student_id == "ADMIN123":
             admin_panel()
         else:
             chat_interface(st.session_state.student_id)
